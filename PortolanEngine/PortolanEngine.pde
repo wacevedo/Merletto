@@ -1,122 +1,223 @@
 /**
  * PORTOLAN ENGINE - Processing Version
- * Generatore di Griglie Relazionali per il Design
+ * Relational Grid Generator for Design
  * 
  * Controls:
- * - Click to add nodes
- * - UP/DOWN arrows: Change connections per node
+ * - Click to add nodes (free mode) or connect nodes (template mode)
+ * - UP/DOWN arrows: Change connections per node (free mode only)
  * - LEFT/RIGHT arrows: Adjust Phi tension
  * - 'c' or 'C': Clear all nodes
  * - 'e' or 'E': Export coordinates to JSON
- * - 't' or 'T': Cycle through templates
- * - 'm' or 'M': Toggle map/grid overlay
+ * - 'm' or 'M': Toggle historic map overlay (template mode only)
  * - 's' or 'S': Save canvas as image
- * - DELETE/BACKSPACE: Remove last node
+ * - DELETE/BACKSPACE: Remove last connection (template mode) or node (free mode)
+ * - ESC: Close template selector / Exit template mode
  */
 
 // === CONFIGURATION ===
 int connectionsPerNode = 2;
 float phiTension = 1.618;
-boolean showMapOverlay = true;
-int currentTemplate = 0;
+boolean showHistoricMap = false;  // Disabled by default, only works in template mode
+
+// === TEMPLATE MODE ===
+boolean templateMode = false;
+boolean showTemplateSelector = false;
+int selectedTemplateIndex = -1;
+int hoveredTemplateIndex = -1;
+Node selectedNodeForConnection = null;
+ArrayList<Connection> manualConnections;
+String loadedTemplateName = "";
+String loadedTemplateCategoryPath = "";  // Path to the template's category folder
+
+// === TEMPLATE FILES ===
+ArrayList<TemplateFile> templateFiles;
+String templatesPath;
+PImage currentPreviewImage = null;
+PImage historicMapImage = null;  // Background map image for template mode
 
 // === DATA STRUCTURES ===
 ArrayList<Node> nodes;
-ArrayList<Node> fixedNodes;  // Template fixed points
 
 // === COLORS (matching original design) ===
 color bgColor = #0f172a;
 color panelBg = #1e293b;
-color nodeColor = #f97316;      // Orange
-color nodeGlow = #f9731630;     // Orange with alpha
-color lineColor = #f9731699;    // Orange connections
-color cellColor = #14b8a666;    // Teal cells
-color cellFill = #14b8a608;     // Teal fill
+color nodeColor = #f97316;
+color nodeGlow = #f9731630;
+color lineColor = #f9731699;
+color cellColor = #14b8a666;
+color cellFill = #14b8a608;
 color textColor = #f8fafc;
 color accentColor = #f97316;
 color tealColor = #14b8a6;
+color disabledColor = #475569;
+color selectedNodeColor = #22d3ee;
+color modalBg = #0f172acc;
 
 // === UI DIMENSIONS ===
 int panelWidth = 320;
-int canvasLeft = 0;
 int canvasWidth;
 
 // === FONTS ===
 PFont fontBold;
 PFont fontRegular;
 
-// === TEMPLATES ===
-String[] templateNames = {
-  "Vuoto (Libero)",
-  "Triangolo",
-  "Quadrato", 
-  "Pentagono",
-  "Esagono",
-  "Griglia 3x3",
-  "Cerchio (8 punti)",
-  "Stella a 5 punte"
-};
+// === UI POSITIONS ===
+int sliderMargin = 24;
+int selectFormBtnY = 72;
+int connectionsSliderY = 195;
+int phiSliderY = 257;
+int checkboxY = 295;
 
 void setup() {
+  pixelDensity(1);
   size(1200, 800);
   smooth(8);
   
-  // Create fonts - using system fonts for bold text
   fontBold = createFont("SansSerif.bold", 32);
   fontRegular = createFont("SansSerif", 32);
   
   canvasWidth = width - panelWidth;
   
   nodes = new ArrayList<Node>();
-  fixedNodes = new ArrayList<Node>();
+  manualConnections = new ArrayList<Connection>();
+  templateFiles = new ArrayList<TemplateFile>();
   
-  loadTemplate(currentTemplate);
+  // Set templates path relative to sketch
+  templatesPath = sketchPath("templates");
+  
+  // Scan for template files
+  scanTemplateFiles();
 }
 
 void draw() {
   background(bgColor);
   
-  // Draw canvas area
   drawCanvasArea();
   
-  // Draw connections and cells
-  drawConnections();
+  if (templateMode) {
+    drawManualConnections();
+  } else {
+    drawConnections();
+  }
   
-  // Draw nodes
   drawNodes();
-  
-  // Draw control panel
   drawControlPanel();
+  
+  if (showTemplateSelector) {
+    drawTemplateSelector();
+  }
+}
+
+// === SCAN TEMPLATE FILES ===
+void scanTemplateFiles() {
+  templateFiles.clear();
+  
+  File templatesDir = new File(templatesPath);
+  if (!templatesDir.exists()) {
+    println("Templates directory not found: " + templatesPath);
+    return;
+  }
+  
+  // Iterate through category folders (e.g., "venesia")
+  File[] categories = templatesDir.listFiles();
+  if (categories == null) return;
+  
+  for (File category : categories) {
+    if (category.isDirectory()) {
+      File nodesDir = new File(category, "nodes");
+      if (nodesDir.exists() && nodesDir.isDirectory()) {
+        File[] jsonFiles = nodesDir.listFiles(new java.io.FilenameFilter() {
+          public boolean accept(File dir, String name) {
+            return name.toLowerCase().endsWith(".json");
+          }
+        });
+        
+        if (jsonFiles != null) {
+          for (File jsonFile : jsonFiles) {
+            try {
+              JSONObject json = loadJSONObject(jsonFile.getAbsolutePath());
+              String name = json.getString("name", jsonFile.getName());
+              String imageName = json.getString("image", "");
+              String imagePath = "";
+              if (!imageName.isEmpty()) {
+                imagePath = new File(nodesDir, imageName).getAbsolutePath();
+              }
+              templateFiles.add(new TemplateFile(
+                name,
+                jsonFile.getAbsolutePath(),
+                imagePath,
+                category.getName(),
+                category.getAbsolutePath()  // Full path to category folder
+              ));
+            } catch (Exception e) {
+              println("Error loading template: " + jsonFile.getName());
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  println("Found " + templateFiles.size() + " templates");
 }
 
 // === CANVAS AREA ===
 void drawCanvasArea() {
-  // Canvas background
   fill(#0f172a);
   stroke(#334155);
   strokeWeight(1);
   rect(20, 20, canvasWidth - 40, height - 40, 16);
   
-  // Grid overlay
-  if (showMapOverlay) {
-    stroke(#33415540);
-    strokeWeight(0.5);
-    int gridSize = 50;
-    for (int x = 20; x < canvasWidth - 20; x += gridSize) {
-      line(x, 20, x, height - 20);
-    }
-    for (int y = 20; y < height - 20; y += gridSize) {
-      line(20, y, canvasWidth - 20, y);
-    }
+  // Show historic map background (only in template mode)
+  if (templateMode && showHistoricMap && historicMapImage != null) {
+    // Calculate scale to fit canvas while maintaining aspect ratio
+    float canvasW = canvasWidth - 40;
+    float canvasH = height - 40;
+    float scale = min(canvasW / historicMapImage.width, canvasH / historicMapImage.height);
+    float imgW = historicMapImage.width * scale;
+    float imgH = historicMapImage.height * scale;
+    float imgX = 20 + (canvasW - imgW) / 2;
+    float imgY = 20 + (canvasH - imgH) / 2;
+    
+    // Draw with transparency
+    tint(255, 80);  // Semi-transparent
+    image(historicMapImage, imgX, imgY, imgW, imgH);
+    noTint();
+  }
+  
+  // Template mode indicator
+  if (templateMode) {
+    fill(tealColor);
+    textFont(fontBold);
+    textSize(12);
+    textAlign(LEFT);
+    text("TEMPLATE MODE: " + loadedTemplateName, 35, 45);
+    fill(#64748b);
+    textFont(fontRegular);
+    textSize(10);
+    text("Click two nodes to connect them", 35, 60);
   }
 }
 
-// === DRAWING FUNCTIONS ===
+// === DRAW MANUAL CONNECTIONS (Template Mode) ===
+void drawManualConnections() {
+  for (Connection conn : manualConnections) {
+    Node n1 = conn.node1;
+    Node n2 = conn.node2;
+    
+    stroke(lineColor);
+    strokeWeight(1.5);
+    line(n1.x, n1.y, n2.x, n2.y);
+    
+    drawRhombicCell(n1, n2);
+  }
+}
+
+// === DRAW AUTO CONNECTIONS (Free Mode) ===
 void drawConnections() {
   if (nodes.size() < 1) return;
   
   for (Node node : nodes) {
-    // Get nearest neighbors
     ArrayList<NodeDistance> distances = new ArrayList<NodeDistance>();
     
     for (Node other : nodes) {
@@ -126,20 +227,16 @@ void drawConnections() {
       }
     }
     
-    // Sort by distance
     java.util.Collections.sort(distances);
     
-    // Connect to N nearest
     int limit = min(connectionsPerNode, distances.size());
     for (int i = 0; i < limit; i++) {
       Node target = distances.get(i).node;
       
-      // Draw primary connection line
       stroke(lineColor);
       strokeWeight(1.5);
       line(node.x, node.y, target.x, target.y);
       
-      // Draw rhombic cell
       drawRhombicCell(node, target);
     }
   }
@@ -151,7 +248,6 @@ void drawRhombicCell(Node p1, Node p2) {
   float d = dist(p1.x, p1.y, p2.x, p2.y);
   float angle = atan2(p2.y - p1.y, p2.x - p1.x);
   
-  // Rhomb amplitude guided by Phi
   float offset = d / (phiTension * 2.2);
   
   float v1x = midX + cos(angle + HALF_PI) * offset;
@@ -159,7 +255,6 @@ void drawRhombicCell(Node p1, Node p2) {
   float v2x = midX + cos(angle - HALF_PI) * offset;
   float v2y = midY + sin(angle - HALF_PI) * offset;
   
-  // Draw rhombic shape
   stroke(cellColor);
   strokeWeight(1);
   fill(cellFill);
@@ -176,12 +271,20 @@ void drawNodes() {
   for (Node node : nodes) {
     // Outer glow
     noFill();
-    stroke(nodeGlow);
-    strokeWeight(1);
-    ellipse(node.x, node.y, 24, 24);
+    if (node == selectedNodeForConnection) {
+      stroke(selectedNodeColor);
+      strokeWeight(2);
+      ellipse(node.x, node.y, 30, 30);
+    } else {
+      stroke(nodeGlow);
+      strokeWeight(1);
+      ellipse(node.x, node.y, 24, 24);
+    }
     
     // Inner node
-    if (node.isFixed) {
+    if (node == selectedNodeForConnection) {
+      fill(selectedNodeColor);
+    } else if (node.isFixed) {
       fill(tealColor);
     } else {
       fill(nodeColor);
@@ -194,14 +297,11 @@ void drawNodes() {
 // === CONTROL PANEL ===
 void drawControlPanel() {
   int px = canvasWidth;
-  int py = 0;
   
-  // Panel background
   fill(panelBg);
   noStroke();
-  rect(px, py, panelWidth, height);
+  rect(px, 0, panelWidth, height);
   
-  // Left border
   stroke(#334155);
   strokeWeight(1);
   line(px, 0, px, height);
@@ -215,48 +315,65 @@ void drawControlPanel() {
   textSize(22);
   textAlign(LEFT);
   text("PORTOLAN ENGINE", px + margin, yPos);
-  yPos += 22;
+  yPos += 20;
   
   textFont(fontRegular);
   fill(#94a3b8);
+  textSize(11);
+  text("Relational Grid Generator", px + margin, yPos);
+  yPos += 25;
+  
+  // Select Form Button
+  selectFormBtnY = yPos;
+  if (templateMode) {
+    fill(#dc2626);
+  } else {
+    fill(#3b82f6);
+  }
+  noStroke();
+  rect(px + margin, yPos, panelWidth - 2*margin, 32, 6);
+  textFont(fontBold);
+  fill(textColor);
   textSize(12);
-  text("Generatore di Griglie Relazionali", px + margin, yPos);
-  yPos += 45;
+  textAlign(CENTER);
+  text(templateMode ? "Exit Template Mode" : "Select Form", px + panelWidth/2, yPos + 21);
+  textAlign(LEFT);
+  yPos += 50;
   
   // Separator
   stroke(#334155);
-  strokeWeight(1);
-  line(px + margin, yPos - 18, px + panelWidth - margin, yPos - 18);
+  line(px + margin, yPos - 12, px + panelWidth - margin, yPos - 12);
   
   // Section: Input
   textFont(fontBold);
   fill(textColor);
   textSize(13);
-  text("INPUT: NODI & TRAIETTORIE", px + margin, yPos);
-  yPos += 32;
+  text("INPUT: NODES & TRAJECTORIES", px + margin, yPos);
+  yPos += 30;
   
-  // Connections per node
+  // Connections per node (disabled in template mode)
   textFont(fontRegular);
-  fill(#cbd5e1);
+  fill(templateMode ? disabledColor : #cbd5e1);
   textSize(14);
-  text("Connessioni per Nodo:", px + margin, yPos);
+  text("Connections per Node:", px + margin, yPos);
   textFont(fontBold);
-  fill(accentColor);
+  fill(templateMode ? disabledColor : accentColor);
   textAlign(RIGHT);
   textSize(16);
-  text(str(connectionsPerNode), px + panelWidth - margin, yPos);
+  text(templateMode ? "Manual" : str(connectionsPerNode), px + panelWidth - margin, yPos);
   textAlign(LEFT);
   yPos += 24;
   
-  // Slider visual
-  drawSlider(px + margin, yPos, panelWidth - 2*margin, connectionsPerNode, 1, 5, accentColor);
+  connectionsSliderY = yPos;
+  drawSlider(px + margin, yPos, panelWidth - 2*margin, connectionsPerNode, 1, 5, 
+             templateMode ? disabledColor : accentColor, templateMode);
   yPos += 38;
   
   // Phi tension
   textFont(fontRegular);
   fill(#cbd5e1);
   textSize(14);
-  text("Tensione Rombica (Phi):", px + margin, yPos);
+  text("Rhombic Tension (Phi):", px + margin, yPos);
   textFont(fontBold);
   fill(tealColor);
   textAlign(RIGHT);
@@ -265,24 +382,40 @@ void drawControlPanel() {
   textAlign(LEFT);
   yPos += 24;
   
-  // Slider visual
-  drawSlider(px + margin, yPos, panelWidth - 2*margin, phiTension, 1.0, 2.0, tealColor);
+  phiSliderY = yPos;
+  drawSlider(px + margin, yPos, panelWidth - 2*margin, phiTension, 1.0, 2.0, tealColor, false);
   yPos += 38;
   
-  // Show map checkbox
-  fill(showMapOverlay ? tealColor : #64748b);
+  // Checkbox - Show Historic Map (only enabled in template mode)
+  checkboxY = yPos;
+  boolean mapCheckboxEnabled = templateMode && historicMapImage != null;
+  
+  if (mapCheckboxEnabled) {
+    fill(showHistoricMap ? tealColor : #64748b);
+  } else {
+    fill(#334155);  // Disabled color
+  }
   noStroke();
   rect(px + margin, yPos - 12, 18, 18, 3);
-  if (showMapOverlay) {
+  
+  if (showHistoricMap && mapCheckboxEnabled) {
     fill(bgColor);
     textFont(fontBold);
     textSize(14);
     text("✓", px + margin + 3, yPos + 2);
   }
+  
   textFont(fontRegular);
-  fill(#cbd5e1);
+  fill(mapCheckboxEnabled ? #cbd5e1 : disabledColor);
   textSize(14);
-  text("Mostra Mappa Storica", px + margin + 28, yPos);
+  text("Show Historic Map", px + margin + 28, yPos);
+  
+  // Show hint if disabled
+  if (!templateMode) {
+    fill(#64748b);
+    textSize(9);
+    text("(select a form first)", px + margin + 28, yPos + 14);
+  }
   yPos += 45;
   
   // Separator
@@ -293,14 +426,13 @@ void drawControlPanel() {
   textFont(fontBold);
   fill(textColor);
   textSize(13);
-  text("ANALISI OUTPUT", px + margin, yPos);
+  text("OUTPUT ANALYSIS", px + margin, yPos);
   yPos += 28;
   
-  // Stats boxes
   int boxW = (panelWidth - 3*margin) / 2;
   int boxH = 70;
   
-  // Nodi Attivi box
+  // Nodi Attivi
   fill(#0f172a);
   stroke(#334155);
   strokeWeight(1);
@@ -308,32 +440,33 @@ void drawControlPanel() {
   textFont(fontRegular);
   fill(#64748b);
   textSize(11);
-  text("NODI ATTIVI", px + margin + 12, yPos + 22);
+  text("ACTIVE NODES", px + margin + 12, yPos + 22);
   textFont(fontBold);
   fill(accentColor);
   textSize(28);
   text(str(nodes.size()), px + margin + 12, yPos + 55);
   
-  // Celle Generative box
+  // Connections count
   fill(#0f172a);
   stroke(#334155);
   rect(px + margin + boxW + margin, yPos, boxW, boxH, 10);
   textFont(fontRegular);
   fill(#64748b);
   textSize(11);
-  text("CELLE GENERATIVE", px + margin + boxW + margin + 10, yPos + 22);
+  text(templateMode ? "CONNECTIONS" : "GEN. CELLS", px + margin + boxW + margin + 8, yPos + 22);
   textFont(fontBold);
   fill(tealColor);
   textSize(28);
-  text(str(max(0, nodes.size() - 1)), px + margin + boxW + margin + 10, yPos + 55);
+  int connCount = templateMode ? manualConnections.size() : max(0, nodes.size() - 1);
+  text(str(connCount), px + margin + boxW + margin + 8, yPos + 55);
   
   yPos += boxH + 18;
   
-  // Data log area
+  // Data log
   fill(#0a0f1a);
   stroke(#1e293b);
   strokeWeight(1);
-  int logHeight = 140;
+  int logHeight = 120;
   rect(px + margin, yPos, panelWidth - 2*margin, logHeight, 10);
   
   textFont(fontRegular);
@@ -342,25 +475,32 @@ void drawControlPanel() {
   int logY = yPos + 18;
   int lineHeight = 14;
   int maxLines = (logHeight - 20) / lineHeight;
-  int displayCount = min(nodes.size(), maxLines);
-  int startIdx = max(0, nodes.size() - displayCount);
   
-  if (nodes.size() == 0) {
-    fill(#64748b);
-    text("// In attesa di input...", px + margin + 12, logY);
-  } else {
+  if (templateMode && manualConnections.size() > 0) {
+    int displayCount = min(manualConnections.size(), maxLines);
+    int startIdx = max(0, manualConnections.size() - displayCount);
+    for (int i = startIdx; i < manualConnections.size(); i++) {
+      Connection c = manualConnections.get(i);
+      text("CONN " + i + ": N" + c.node1.id + " → N" + c.node2.id, px + margin + 12, logY);
+      logY += lineHeight;
+    }
+  } else if (nodes.size() > 0) {
+    int displayCount = min(nodes.size(), maxLines);
+    int startIdx = max(0, nodes.size() - displayCount);
     for (int i = startIdx; i < nodes.size(); i++) {
       Node n = nodes.get(i);
       String prefix = n.isFixed ? "[F] " : "";
       text(prefix + "NODE_" + n.id + " [" + round(n.x) + "," + round(n.y) + "]", px + margin + 12, logY);
       logY += lineHeight;
     }
+  } else {
+    fill(#64748b);
+    text("// Awaiting input...", px + margin + 12, logY);
   }
   
-  // Bottom section - fixed position from bottom
+  // Buttons
   int bottomY = height - 100;
   
-  // Clear button
   fill(#1e293b);
   stroke(#475569);
   strokeWeight(1);
@@ -369,66 +509,244 @@ void drawControlPanel() {
   fill(textColor);
   textSize(13);
   textAlign(CENTER);
-  text("PULISCI FRAMEWORK", px + panelWidth/2, bottomY + 25);
+  text("CLEAR FRAMEWORK", px + panelWidth/2, bottomY + 25);
   
   bottomY += 48;
   
-  // Export button
   fill(accentColor);
   noStroke();
   rect(px + margin, bottomY, panelWidth - 2*margin, 42, 10);
   fill(textColor);
   textSize(14);
-  text("Esporta Coordinate (JSON)", px + panelWidth/2, bottomY + 28);
+  text("Export Coordinates (JSON)", px + panelWidth/2, bottomY + 28);
   
   textAlign(LEFT);
   textFont(fontRegular);
 }
 
-void drawSlider(float x, float y, float w, float value, float minVal, float maxVal, color c) {
-  // Track background
+void drawSlider(float x, float y, float w, float value, float minVal, float maxVal, color c, boolean disabled) {
   noStroke();
-  fill(#334155);
+  fill(disabled ? #1e293b : #334155);
   rect(x, y - 3, w, 6, 3);
   
-  // Filled portion
-  float pct = map(value, minVal, maxVal, 0, 1);
-  fill(c);
-  rect(x, y - 3, w * pct, 6, 3);
-  
-  // Handle
-  fill(c);
+  if (!disabled) {
+    float pct = map(value, minVal, maxVal, 0, 1);
+    fill(c);
+    rect(x, y - 3, w * pct, 6, 3);
+    
+    fill(c);
+    noStroke();
+    ellipse(x + w * pct, y, 16, 16);
+  }
+}
+
+// === TEMPLATE SELECTOR MODAL ===
+void drawTemplateSelector() {
+  // Dim background
+  fill(modalBg);
   noStroke();
-  ellipse(x + w * pct, y, 16, 16);
+  rect(0, 0, width, height);
+  
+  // Modal window
+  int modalW = 500;
+  int modalH = 600;
+  int modalX = (width - modalW) / 2;
+  int modalY = (height - modalH) / 2;
+  
+  // Modal background
+  fill(panelBg);
+  stroke(#475569);
+  strokeWeight(2);
+  rect(modalX, modalY, modalW, modalH, 16);
+  
+  // Header
+  fill(#3b82f6);
+  noStroke();
+  rect(modalX, modalY, modalW, 50, 16, 16, 0, 0);
+  
+  textFont(fontBold);
+  fill(textColor);
+  textSize(18);
+  textAlign(LEFT);
+  text("Select Form", modalX + 20, modalY + 32);
+  
+  // Close button
+  fill(#ef4444);
+  ellipse(modalX + modalW - 25, modalY + 25, 20, 20);
+  fill(textColor);
+  textSize(14);
+  textAlign(CENTER);
+  text("×", modalX + modalW - 25, modalY + 30);
+  
+  // Preview area
+  int previewX = modalX + 20;
+  int previewY = modalY + 70;
+  int previewW = modalW - 40;
+  int previewH = 250;
+  
+  fill(#0f172a);
+  stroke(#334155);
+  strokeWeight(1);
+  rect(previewX, previewY, previewW, previewH, 8);
+  
+  // Draw preview image or placeholder
+  if (currentPreviewImage != null && hoveredTemplateIndex >= 0) {
+    // Scale and center image
+    float scale = min((float)(previewW - 20) / currentPreviewImage.width, 
+                      (float)(previewH - 20) / currentPreviewImage.height);
+    float imgW = currentPreviewImage.width * scale;
+    float imgH = currentPreviewImage.height * scale;
+    float imgX = previewX + (previewW - imgW) / 2;
+    float imgY = previewY + (previewH - imgH) / 2;
+    image(currentPreviewImage, imgX, imgY, imgW, imgH);
+  } else {
+    // Placeholder X
+    stroke(#334155);
+    strokeWeight(2);
+    line(previewX + 20, previewY + 20, previewX + previewW - 20, previewY + previewH - 20);
+    line(previewX + previewW - 20, previewY + 20, previewX + 20, previewY + previewH - 20);
+    
+    textFont(fontRegular);
+    fill(#64748b);
+    textSize(12);
+    textAlign(CENTER);
+    text("Hover over a template to preview", previewX + previewW/2, previewY + previewH/2 + 50);
+  }
+  
+  // Template list
+  int listY = previewY + previewH + 20;
+  int itemH = 40;
+  
+  textAlign(LEFT);
+  
+  if (templateFiles.size() == 0) {
+    fill(#64748b);
+    textFont(fontRegular);
+    textSize(14);
+    text("No templates found in templates folder", modalX + 20, listY + 25);
+  } else {
+    for (int i = 0; i < templateFiles.size(); i++) {
+      TemplateFile tf = templateFiles.get(i);
+      int itemY = listY + i * itemH;
+      
+      // Check if hovered
+      boolean hovered = mouseX > modalX + 10 && mouseX < modalX + modalW - 10 &&
+                        mouseY > itemY && mouseY < itemY + itemH - 5;
+      
+      if (hovered) {
+        hoveredTemplateIndex = i;
+        // Load preview image if needed
+        if (currentPreviewImage == null || selectedTemplateIndex != i) {
+          if (!tf.imagePath.isEmpty()) {
+            try {
+              PImage tempImg = loadImage(tf.imagePath);
+              // Verify image loaded correctly
+              if (tempImg != null && tempImg.width > 0 && tempImg.height > 0) {
+                currentPreviewImage = tempImg;
+              } else {
+                currentPreviewImage = null;
+              }
+            } catch (Exception e) {
+              currentPreviewImage = null;
+            }
+          }
+          selectedTemplateIndex = i;
+        }
+      }
+      
+      // Item background
+      fill(hovered ? #334155 : #1e293b);
+      stroke(#475569);
+      strokeWeight(1);
+      rect(modalX + 10, itemY, modalW - 20, itemH - 5, 8);
+      
+      // Template name
+      textFont(fontBold);
+      fill(hovered ? accentColor : textColor);
+      textSize(14);
+      text("Template " + nf(i, 2) + ": " + tf.name, modalX + 20, itemY + 25);
+      
+      // Category
+      textFont(fontRegular);
+      fill(#64748b);
+      textSize(10);
+      text(tf.category, modalX + modalW - 80, itemY + 25);
+    }
+  }
+  
+  textAlign(LEFT);
 }
 
 // === INPUT HANDLING ===
-
-// Store UI element positions for click detection
-int sliderMargin = 24;
-int connectionsSliderY = 163;
-int phiSliderY = 225;
-int checkboxY = 263;
-int clearBtnY;
-int exportBtnY;
-
 void mousePressed() {
+  // Template selector modal
+  if (showTemplateSelector) {
+    int modalW = 500;
+    int modalH = 600;
+    int modalX = (width - modalW) / 2;
+    int modalY = (height - modalH) / 2;
+    
+    // Close button
+    if (dist(mouseX, mouseY, modalX + modalW - 25, modalY + 25) < 15) {
+      showTemplateSelector = false;
+      currentPreviewImage = null;
+      hoveredTemplateIndex = -1;
+      return;
+    }
+    
+    // Click outside modal
+    if (mouseX < modalX || mouseX > modalX + modalW || 
+        mouseY < modalY || mouseY > modalY + modalH) {
+      showTemplateSelector = false;
+      currentPreviewImage = null;
+      hoveredTemplateIndex = -1;
+      return;
+    }
+    
+    // Template item click
+    int previewH = 250;
+    int listY = modalY + 70 + previewH + 20;
+    int itemH = 40;
+    
+    for (int i = 0; i < templateFiles.size(); i++) {
+      int itemY = listY + i * itemH;
+      if (mouseX > modalX + 10 && mouseX < modalX + modalW - 10 &&
+          mouseY > itemY && mouseY < itemY + itemH - 5) {
+        loadTemplateFromFile(templateFiles.get(i));
+        showTemplateSelector = false;
+        currentPreviewImage = null;
+        hoveredTemplateIndex = -1;
+        return;
+      }
+    }
+    return;
+  }
+  
   int px = canvasWidth;
   float sliderWidth = panelWidth - 2 * sliderMargin;
   
-  // Update button positions
-  clearBtnY = height - 100;
-  exportBtnY = height - 52;
+  // Select Form / Exit Template Mode button
+  if (mouseX > px + sliderMargin && mouseX < px + panelWidth - sliderMargin &&
+      mouseY > selectFormBtnY && mouseY < selectFormBtnY + 32) {
+    if (templateMode) {
+      exitTemplateMode();
+    } else {
+      showTemplateSelector = true;
+      hoveredTemplateIndex = -1;
+      currentPreviewImage = null;
+    }
+    return;
+  }
   
-  // Check if click is on Connections slider
-  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
+  // Connections slider (only in free mode)
+  if (!templateMode && mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
       mouseY > connectionsSliderY - 10 && mouseY < connectionsSliderY + 10) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
     connectionsPerNode = round(map(pct, 0, 1, 1, 5));
     return;
   }
   
-  // Check if click is on Phi slider
+  // Phi slider
   if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
       mouseY > phiSliderY - 10 && mouseY < phiSliderY + 10) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
@@ -436,61 +754,98 @@ void mousePressed() {
     return;
   }
   
-  // Check if click is on checkbox
+  // Checkbox - only works in template mode with a map image
   if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + 18 &&
       mouseY > checkboxY - 12 && mouseY < checkboxY + 6) {
-    showMapOverlay = !showMapOverlay;
+    if (templateMode && historicMapImage != null) {
+      showHistoricMap = !showHistoricMap;
+    }
     return;
   }
   
-  // Check if click is on Clear button
+  // Clear button
+  int clearBtnY = height - 100;
   if (mouseX > px + sliderMargin && mouseX < px + panelWidth - sliderMargin &&
       mouseY > clearBtnY && mouseY < clearBtnY + 38) {
-    nodes.clear();
-    loadTemplate(currentTemplate);
+    clearCanvas();
     return;
   }
   
-  // Check if click is on Export button
+  // Export button
+  int exportBtnY = height - 52;
   if (mouseX > px + sliderMargin && mouseX < px + panelWidth - sliderMargin &&
       mouseY > exportBtnY && mouseY < exportBtnY + 42) {
     exportJSON();
     return;
   }
   
-  // Check if click is in canvas area (add node)
+  // Canvas area clicks
   if (mouseX > 20 && mouseX < canvasWidth - 20 && mouseY > 20 && mouseY < height - 20) {
-    nodes.add(new Node(mouseX, mouseY, nodes.size(), false));
+    if (templateMode) {
+      // In template mode: click nodes to connect
+      Node clickedNode = getNodeAt(mouseX, mouseY);
+      if (clickedNode != null) {
+        if (selectedNodeForConnection == null) {
+          selectedNodeForConnection = clickedNode;
+        } else if (clickedNode != selectedNodeForConnection) {
+          // Create connection
+          if (!connectionExists(selectedNodeForConnection, clickedNode)) {
+            manualConnections.add(new Connection(selectedNodeForConnection, clickedNode));
+          }
+          selectedNodeForConnection = null;
+        } else {
+          // Clicked same node, deselect
+          selectedNodeForConnection = null;
+        }
+      }
+    } else {
+      // Free mode: add new node
+      nodes.add(new Node(mouseX, mouseY, nodes.size(), false));
+    }
   }
 }
 
 void mouseDragged() {
+  if (showTemplateSelector) return;
+  
   int px = canvasWidth;
   float sliderWidth = panelWidth - 2 * sliderMargin;
   
-  // Drag on Connections slider
-  if (mouseX > px + sliderMargin - 20 && mouseX < px + sliderMargin + sliderWidth + 20 &&
-      mouseY > connectionsSliderY - 15 && mouseY < connectionsSliderY + 15) {
+  // Connections slider (only in free mode)
+  if (!templateMode && mouseY > connectionsSliderY - 20 && mouseY < connectionsSliderY + 20) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
     connectionsPerNode = round(map(pct, 0, 1, 1, 5));
     return;
   }
   
-  // Drag on Phi slider
-  if (mouseX > px + sliderMargin - 20 && mouseX < px + sliderMargin + sliderWidth + 20 &&
-      mouseY > phiSliderY - 15 && mouseY < phiSliderY + 15) {
+  // Phi slider
+  if (mouseY > phiSliderY - 20 && mouseY < phiSliderY + 20) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
     phiTension = map(pct, 0, 1, 1.0, 2.0);
-    return;
   }
 }
 
 void keyPressed() {
-  // Connections adjustment
-  if (keyCode == UP) {
-    connectionsPerNode = min(5, connectionsPerNode + 1);
-  } else if (keyCode == DOWN) {
-    connectionsPerNode = max(1, connectionsPerNode - 1);
+  if (key == ESC) {
+    key = 0;  // Prevent closing sketch
+    if (showTemplateSelector) {
+      showTemplateSelector = false;
+      currentPreviewImage = null;
+    } else if (templateMode) {
+      exitTemplateMode();
+    }
+    return;
+  }
+  
+  if (showTemplateSelector) return;
+  
+  // Connections adjustment (free mode only)
+  if (!templateMode) {
+    if (keyCode == UP) {
+      connectionsPerNode = min(5, connectionsPerNode + 1);
+    } else if (keyCode == DOWN) {
+      connectionsPerNode = max(1, connectionsPerNode - 1);
+    }
   }
   
   // Phi adjustment
@@ -500,118 +855,177 @@ void keyPressed() {
     phiTension = max(1.0, phiTension - 0.05);
   }
   
-  // Clear
   if (key == 'c' || key == 'C') {
-    nodes.clear();
-    loadTemplate(currentTemplate);
+    clearCanvas();
   }
   
-  // Export
   if (key == 'e' || key == 'E') {
     exportJSON();
   }
   
-  // Save image
   if (key == 's' || key == 'S') {
     saveFrame("portolan_export_####.png");
     println("Image saved!");
   }
   
-  // Toggle map
   if (key == 'm' || key == 'M') {
-    showMapOverlay = !showMapOverlay;
+    if (templateMode && historicMapImage != null) {
+      showHistoricMap = !showHistoricMap;
+    }
   }
   
-  // Cycle templates
-  if (key == 't' || key == 'T') {
-    currentTemplate = (currentTemplate + 1) % templateNames.length;
-    nodes.clear();
-    loadTemplate(currentTemplate);
-  }
-  
-  // Delete last node
+  // Delete last
   if (keyCode == DELETE || keyCode == BACKSPACE) {
-    if (nodes.size() > 0) {
-      Node last = nodes.get(nodes.size() - 1);
-      if (!last.isFixed) {
-        nodes.remove(nodes.size() - 1);
+    if (templateMode) {
+      if (manualConnections.size() > 0) {
+        manualConnections.remove(manualConnections.size() - 1);
+      }
+    } else {
+      if (nodes.size() > 0) {
+        Node last = nodes.get(nodes.size() - 1);
+        if (!last.isFixed) {
+          nodes.remove(nodes.size() - 1);
+        }
       }
     }
   }
 }
 
-// === TEMPLATES ===
-void loadTemplate(int templateIndex) {
-  float cx = (canvasWidth - 40) / 2 + 20;
-  float cy = height / 2;
-  float radius = min(canvasWidth - 100, height - 100) / 3;
-  
-  switch(templateIndex) {
-    case 0: // Empty
-      break;
-      
-    case 1: // Triangle
-      addPolygonPoints(3, cx, cy, radius);
-      break;
-      
-    case 2: // Square
-      addPolygonPoints(4, cx, cy, radius);
-      break;
-      
-    case 3: // Pentagon
-      addPolygonPoints(5, cx, cy, radius);
-      break;
-      
-    case 4: // Hexagon
-      addPolygonPoints(6, cx, cy, radius);
-      break;
-      
-    case 5: // 3x3 Grid
-      addGridPoints(3, 3, cx, cy, radius * 1.5);
-      break;
-      
-    case 6: // Circle (8 points)
-      addPolygonPoints(8, cx, cy, radius);
-      break;
-      
-    case 7: // 5-point star
-      addStarPoints(5, cx, cy, radius, radius * 0.4);
-      break;
+// === TEMPLATE LOADING ===
+void loadTemplateFromFile(TemplateFile tf) {
+  try {
+    JSONObject json = loadJSONObject(tf.path);
+    JSONArray jsonNodes = json.getJSONArray("nodes");
+    
+    nodes.clear();
+    manualConnections.clear();
+    selectedNodeForConnection = null;
+    showHistoricMap = false;  // Reset checkbox when loading new template
+    
+    // Calculate scale to fit canvas
+    float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+    float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+    
+    for (int i = 0; i < jsonNodes.size(); i++) {
+      JSONObject nodeObj = jsonNodes.getJSONObject(i);
+      float x = nodeObj.getFloat("x");
+      float y = nodeObj.getFloat("y");
+      minX = min(minX, x);
+      maxX = max(maxX, x);
+      minY = min(minY, y);
+      maxY = max(maxY, y);
+    }
+    
+    float dataW = maxX - minX;
+    float dataH = maxY - minY;
+    float canvasDrawW = canvasWidth - 100;
+    float canvasDrawH = height - 100;
+    float scale = min(canvasDrawW / dataW, canvasDrawH / dataH) * 0.9;
+    float offsetX = 50 + (canvasDrawW - dataW * scale) / 2;
+    float offsetY = 50 + (canvasDrawH - dataH * scale) / 2;
+    
+    for (int i = 0; i < jsonNodes.size(); i++) {
+      JSONObject nodeObj = jsonNodes.getJSONObject(i);
+      float x = (nodeObj.getFloat("x") - minX) * scale + offsetX;
+      float y = (nodeObj.getFloat("y") - minY) * scale + offsetY;
+      int id = nodeObj.getInt("id", i);
+      nodes.add(new Node(x, y, id, true));
+    }
+    
+    templateMode = true;
+    loadedTemplateName = tf.name;
+    loadedTemplateCategoryPath = tf.categoryPath;
+    
+    // Load the historic map image from the map folder
+    loadHistoricMapImage(tf.categoryPath);
+    
+    println("Loaded template: " + tf.name + " with " + nodes.size() + " nodes");
+    
+  } catch (Exception e) {
+    println("Error loading template: " + e.getMessage());
   }
 }
 
-void addPolygonPoints(int n, float cx, float cy, float r) {
-  for (int i = 0; i < n; i++) {
-    float angle = TWO_PI * i / n - HALF_PI;
-    float x = cx + cos(angle) * r;
-    float y = cy + sin(angle) * r;
-    nodes.add(new Node(x, y, nodes.size(), true));
-  }
-}
-
-void addGridPoints(int cols, int rows, float cx, float cy, float size) {
-  float cellW = size / (cols - 1);
-  float cellH = size / (rows - 1);
-  float startX = cx - size/2;
-  float startY = cy - size/2;
+void loadHistoricMapImage(String categoryPath) {
+  historicMapImage = null;
   
-  for (int row = 0; row < rows; row++) {
-    for (int col = 0; col < cols; col++) {
-      float x = startX + col * cellW;
-      float y = startY + row * cellH;
-      nodes.add(new Node(x, y, nodes.size(), true));
+  File mapDir = new File(categoryPath, "map");
+  if (mapDir.exists() && mapDir.isDirectory()) {
+    // Find the first image file in the map folder (prefer PNG over JPEG for compatibility)
+    File[] imageFiles = mapDir.listFiles(new java.io.FilenameFilter() {
+      public boolean accept(File dir, String name) {
+        String lower = name.toLowerCase();
+        return lower.endsWith(".png") || lower.endsWith(".gif") ||
+               lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+      }
+    });
+    
+    if (imageFiles != null && imageFiles.length > 0) {
+      // Sort to prefer PNG files (more compatible)
+      java.util.Arrays.sort(imageFiles, new java.util.Comparator<File>() {
+        public int compare(File a, File b) {
+          boolean aIsPng = a.getName().toLowerCase().endsWith(".png");
+          boolean bIsPng = b.getName().toLowerCase().endsWith(".png");
+          if (aIsPng && !bIsPng) return -1;
+          if (!aIsPng && bIsPng) return 1;
+          return a.getName().compareTo(b.getName());
+        }
+      });
+      
+      try {
+        historicMapImage = loadImage(imageFiles[0].getAbsolutePath());
+        // Verify image loaded correctly
+        if (historicMapImage != null && historicMapImage.width > 0 && historicMapImage.height > 0) {
+          println("Loaded historic map: " + imageFiles[0].getName());
+        } else {
+          println("Warning: Historic map image failed to load properly: " + imageFiles[0].getName());
+          historicMapImage = null;
+        }
+      } catch (Exception e) {
+        println("Error loading historic map: " + e.getMessage());
+        historicMapImage = null;
+      }
     }
   }
 }
 
-void addStarPoints(int points, float cx, float cy, float outerR, float innerR) {
-  for (int i = 0; i < points * 2; i++) {
-    float angle = TWO_PI * i / (points * 2) - HALF_PI;
-    float r = (i % 2 == 0) ? outerR : innerR;
-    float x = cx + cos(angle) * r;
-    float y = cy + sin(angle) * r;
-    nodes.add(new Node(x, y, nodes.size(), true));
+void exitTemplateMode() {
+  templateMode = false;
+  loadedTemplateName = "";
+  loadedTemplateCategoryPath = "";
+  nodes.clear();
+  manualConnections.clear();
+  selectedNodeForConnection = null;
+  historicMapImage = null;
+  showHistoricMap = false;
+}
+
+void clearCanvas() {
+  if (templateMode) {
+    manualConnections.clear();
+    selectedNodeForConnection = null;
+  } else {
+    nodes.clear();
   }
+}
+
+// === HELPER FUNCTIONS ===
+Node getNodeAt(float x, float y) {
+  for (Node node : nodes) {
+    if (dist(x, y, node.x, node.y) < 15) {
+      return node;
+    }
+  }
+  return null;
+}
+
+boolean connectionExists(Node n1, Node n2) {
+  for (Connection c : manualConnections) {
+    if ((c.node1 == n1 && c.node2 == n2) || (c.node1 == n2 && c.node2 == n1)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // === EXPORT ===
@@ -628,25 +1042,36 @@ void exportJSON() {
     jsonNodes.setJSONObject(i, nodeObj);
   }
   
-  // Create export object with metadata
   JSONObject export = new JSONObject();
   export.setString("name", "Portolan Export");
-  export.setString("template", templateNames[currentTemplate]);
+  export.setString("mode", templateMode ? "template" : "free");
+  if (templateMode) {
+    export.setString("template", loadedTemplateName);
+    
+    JSONArray jsonConns = new JSONArray();
+    for (int i = 0; i < manualConnections.size(); i++) {
+      Connection c = manualConnections.get(i);
+      JSONObject connObj = new JSONObject();
+      connObj.setInt("from", c.node1.id);
+      connObj.setInt("to", c.node2.id);
+      jsonConns.setJSONObject(i, connObj);
+    }
+    export.setJSONArray("connections", jsonConns);
+  }
   export.setInt("connectionsPerNode", connectionsPerNode);
   export.setFloat("phiTension", phiTension);
   export.setJSONArray("nodes", jsonNodes);
   
-  // Save with timestamp
   String filename = "portolan_export_" + year() + nf(month(),2) + nf(day(),2) + "_" + nf(hour(),2) + nf(minute(),2) + ".json";
   saveJSONObject(export, filename);
   println("Exported to: " + filename);
 }
 
-// === HELPER CLASSES ===
+// === CLASSES ===
 class Node {
   float x, y;
   int id;
-  boolean isFixed;  // Template fixed point vs user-added
+  boolean isFixed;
   
   Node(float x, float y, int id, boolean isFixed) {
     this.x = x;
@@ -667,5 +1092,30 @@ class NodeDistance implements Comparable<NodeDistance> {
   
   int compareTo(NodeDistance other) {
     return Float.compare(this.distance, other.distance);
+  }
+}
+
+class Connection {
+  Node node1, node2;
+  
+  Connection(Node n1, Node n2) {
+    this.node1 = n1;
+    this.node2 = n2;
+  }
+}
+
+class TemplateFile {
+  String name;
+  String path;
+  String imagePath;
+  String category;
+  String categoryPath;  // Full path to the category folder (for loading map images)
+  
+  TemplateFile(String name, String path, String imagePath, String category, String categoryPath) {
+    this.name = name;
+    this.path = path;
+    this.imagePath = imagePath;
+    this.category = category;
+    this.categoryPath = categoryPath;
   }
 }
