@@ -4,7 +4,7 @@
  * 
  * Controls:
  * - Click to add nodes (free mode) or connect nodes (template mode)
- * - UP/DOWN arrows: Change connections per node (free mode only)
+ * - UP/DOWN arrows: Change connections per node (0-10, 0=manual only in template mode)
  * - LEFT/RIGHT arrows: Adjust Phi tension
  * - 'c' or 'C': Clear all nodes
  * - 'e' or 'E': Export coordinates to JSON
@@ -95,7 +95,11 @@ void draw() {
   drawCanvasArea();
   
   if (templateMode) {
-    drawManualConnections();
+    // In template mode: draw auto-connections (if connectionsPerNode > 0) + manual connections
+    if (connectionsPerNode > 0) {
+      drawConnections();  // Auto-connect to N nearest neighbors
+    }
+    drawManualConnections();  // Plus any manual connections
   } else {
     drawConnections();
   }
@@ -351,22 +355,22 @@ void drawControlPanel() {
   text("INPUT: NODES & TRAJECTORIES", px + margin, yPos);
   yPos += 30;
   
-  // Connections per node (disabled in template mode)
+  // Connections per node (0 = manual only in template mode, 1-10 = auto-connect to N nearest)
   textFont(fontRegular);
-  fill(templateMode ? disabledColor : #cbd5e1);
+  fill(#cbd5e1);
   textSize(14);
   text("Connections per Node:", px + margin, yPos);
   textFont(fontBold);
-  fill(templateMode ? disabledColor : accentColor);
+  fill(accentColor);
   textAlign(RIGHT);
   textSize(16);
-  text(templateMode ? "Manual" : str(connectionsPerNode), px + panelWidth - margin, yPos);
+  text(str(connectionsPerNode), px + panelWidth - margin, yPos);
   textAlign(LEFT);
   yPos += 24;
   
   connectionsSliderY = yPos;
-  drawSlider(px + margin, yPos, panelWidth - 2*margin, connectionsPerNode, 1, 5, 
-             templateMode ? disabledColor : accentColor, templateMode);
+  int minConn = templateMode ? 0 : 1;  // Allow 0 in template mode (manual only)
+  drawSlider(px + margin, yPos, panelWidth - 2*margin, connectionsPerNode, minConn, 10, accentColor, false);
   yPos += 38;
   
   // Phi tension
@@ -738,11 +742,12 @@ void mousePressed() {
     return;
   }
   
-  // Connections slider (only in free mode)
-  if (!templateMode && mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
+  // Connections slider (works in both modes, min is 0 in template mode, 1 in free mode)
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
       mouseY > connectionsSliderY - 10 && mouseY < connectionsSliderY + 10) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
-    connectionsPerNode = round(map(pct, 0, 1, 1, 5));
+    int minConn = templateMode ? 0 : 1;
+    connectionsPerNode = round(map(pct, 0, 1, minConn, 10));
     return;
   }
   
@@ -812,9 +817,11 @@ void mouseDragged() {
   float sliderWidth = panelWidth - 2 * sliderMargin;
   
   // Connections slider (only in free mode)
-  if (!templateMode && mouseY > connectionsSliderY - 20 && mouseY < connectionsSliderY + 20) {
+  // Connections slider drag
+  if (mouseY > connectionsSliderY - 20 && mouseY < connectionsSliderY + 20) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
-    connectionsPerNode = round(map(pct, 0, 1, 1, 5));
+    int minConn = templateMode ? 0 : 1;
+    connectionsPerNode = round(map(pct, 0, 1, minConn, 10));
     return;
   }
   
@@ -839,13 +846,12 @@ void keyPressed() {
   
   if (showTemplateSelector) return;
   
-  // Connections adjustment (free mode only)
-  if (!templateMode) {
-    if (keyCode == UP) {
-      connectionsPerNode = min(5, connectionsPerNode + 1);
-    } else if (keyCode == DOWN) {
-      connectionsPerNode = max(1, connectionsPerNode - 1);
-    }
+  // Connections adjustment (works in both modes, min is 0 in template mode)
+  int minConn = templateMode ? 0 : 1;
+  if (keyCode == UP) {
+    connectionsPerNode = min(10, connectionsPerNode + 1);
+  } else if (keyCode == DOWN) {
+    connectionsPerNode = max(minConn, connectionsPerNode - 1);
   }
   
   // Phi adjustment
@@ -935,6 +941,7 @@ void loadTemplateFromFile(TemplateFile tf) {
     templateMode = true;
     loadedTemplateName = tf.name;
     loadedTemplateCategoryPath = tf.categoryPath;
+    connectionsPerNode = 0;  // Default to manual-only in template mode
     
     // Load the historic map image from the map folder
     loadHistoricMapImage(tf.categoryPath);
@@ -998,6 +1005,7 @@ void exitTemplateMode() {
   selectedNodeForConnection = null;
   historicMapImage = null;
   showHistoricMap = false;
+  connectionsPerNode = 2;  // Reset to default for free mode
 }
 
 void clearCanvas() {
