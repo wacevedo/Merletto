@@ -1,17 +1,17 @@
 /**
  * PORTOLAN ENGINE - Processing Version
  * Relational Grid Generator for Design
+ * Meta-Merletto Veneziano - Pentagon Mesh Generator
  * 
  * Controls:
  * - Click to add nodes (free mode) or connect nodes (template mode)
- * - UP/DOWN arrows: Change connections per node (0-10, 0=manual only in template mode)
- * - LEFT/RIGHT arrows: Adjust Phi tension
- * - 'c' or 'C': Clear all nodes
- * - 'e' or 'E': Export coordinates to JSON
- * - 'm' or 'M': Toggle historic map overlay (template mode only)
- * - 's' or 'S': Save canvas as image
- * - DELETE/BACKSPACE: Remove last connection (template mode) or node (free mode)
- * - ESC: Close template selector / Exit template mode
+ * - UP/DOWN: Connections per node | LEFT/RIGHT: Phi tension
+ * - '[' / ']': Triangle threshold | '-' / '=': Pentagon radius
+ * - 't': Toggle triangles | 'd': Toggle centroids | 'p': Toggle pentagons
+ * - 'g': Generate pentagon mesh
+ * - 'm': Toggle historic map (template mode only)
+ * - 'c': Clear | 'e': Export JSON | 's': Save image
+ * - DELETE/BACKSPACE: Remove last | ESC: Exit mode
  */
 
 // === CONFIGURATION ===
@@ -37,6 +37,25 @@ PImage historicMapImage = null;  // Background map image for template mode
 
 // === DATA STRUCTURES ===
 ArrayList<Node> nodes;
+
+// === TRIANGULATION & MESH (Phase 2-3) ===
+ArrayList<PVector[]> triangles;      // Delaunay triangles
+ArrayList<PVector> centroids;        // Triangle centroids
+boolean showTriangles = true;        // Toggle triangle visibility
+boolean showCentroids = true;        // Toggle centroid visibility
+float triangleThreshold = 220;       // Max edge distance for triangles
+color triangleColor = #3b82f680;     // Blue with alpha
+color centroidColor = #ec489980;     // Pink/magenta
+
+// === PENTAGON MESH (Phase 5-6) ===
+ArrayList<PentagonCell> pentagonCells;  // Generated pentagon cells
+boolean meshGenerated = false;          // Has mesh been generated?
+boolean showPentagons = true;           // Toggle pentagon visibility
+float pentagonRadius = 35;              // Base radius for pentagons
+float deformationLevel = 0.15;          // Deformation amount (0 = regular, 0.3 = very organic)
+boolean useDensityGradient = true;      // Adjust radius based on local density
+color pentagonStroke = #f59e0b;         // Amber/gold stroke
+color pentagonFill = #f59e0b10;         // Very transparent fill
 
 // === COLORS (matching original design) ===
 color bgColor = #0f172a;
@@ -66,7 +85,14 @@ int sliderMargin = 24;
 int selectFormBtnY = 72;
 int connectionsSliderY = 195;
 int phiSliderY = 257;
-int checkboxY = 295;
+int thresholdSliderY = 319;
+int checkboxY = 357;
+int triangleCheckboxY = 395;
+int centroidCheckboxY = 420;
+int generateMeshBtnY = 470;
+int pentagonRadiusSliderY = 520;
+int deformationSliderY = 560;
+int pentagonCheckboxY = 595;
 
 void setup() {
   pixelDensity(1);
@@ -81,6 +107,9 @@ void setup() {
   nodes = new ArrayList<Node>();
   manualConnections = new ArrayList<Connection>();
   templateFiles = new ArrayList<TemplateFile>();
+  triangles = new ArrayList<PVector[]>();
+  centroids = new ArrayList<PVector>();
+  pentagonCells = new ArrayList<PentagonCell>();
   
   // Set templates path relative to sketch
   templatesPath = sketchPath("templates");
@@ -93,6 +122,26 @@ void draw() {
   background(bgColor);
   
   drawCanvasArea();
+  
+  // Generate triangulation (updates every frame based on current nodes)
+  if (nodes.size() >= 3) {
+    generateDelaunayTriangles();
+  }
+  
+  // Draw triangulation layer (Phase 2)
+  if (showTriangles && triangles.size() > 0) {
+    drawTriangles();
+  }
+  
+  // Draw centroids layer (Phase 3)
+  if (showCentroids && centroids.size() > 0) {
+    drawCentroids();
+  }
+  
+  // Draw pentagon mesh (Phase 5-6)
+  if (meshGenerated && showPentagons && pentagonCells.size() > 0) {
+    drawPentagonMesh();
+  }
   
   if (templateMode) {
     // In template mode: draw auto-connections (if connectionsPerNode > 0) + manual connections
@@ -271,6 +320,299 @@ void drawRhombicCell(Node p1, Node p2) {
   endShape(CLOSE);
 }
 
+// === PHASE 2: DELAUNAY TRIANGULATION ===
+void generateDelaunayTriangles() {
+  triangles.clear();
+  centroids.clear();
+  
+  if (nodes.size() < 3) return;
+  
+  // Bowyer-Watson algorithm for Delaunay triangulation
+  // Start with a super-triangle that contains all points
+  float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+  float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+  
+  for (Node n : nodes) {
+    minX = min(minX, n.x);
+    maxX = max(maxX, n.x);
+    minY = min(minY, n.y);
+    maxY = max(maxY, n.y);
+  }
+  
+  float dx = maxX - minX;
+  float dy = maxY - minY;
+  float deltaMax = max(dx, dy) * 2;
+  
+  float midx = (minX + maxX) / 2;
+  float midy = (minY + maxY) / 2;
+  
+  // Super-triangle vertices
+  PVector p1 = new PVector(midx - deltaMax, midy - deltaMax);
+  PVector p2 = new PVector(midx, midy + deltaMax);
+  PVector p3 = new PVector(midx + deltaMax, midy - deltaMax);
+  
+  ArrayList<PVector[]> tempTriangles = new ArrayList<PVector[]>();
+  tempTriangles.add(new PVector[]{p1, p2, p3});
+  
+  // Add each point one at a time
+  for (Node node : nodes) {
+    PVector point = new PVector(node.x, node.y);
+    ArrayList<PVector[]> badTriangles = new ArrayList<PVector[]>();
+    
+    // Find all triangles whose circumcircle contains the point
+    for (PVector[] tri : tempTriangles) {
+      if (isPointInCircumcircle(point, tri)) {
+        badTriangles.add(tri);
+      }
+    }
+    
+    // Find the boundary of the polygonal hole
+    ArrayList<PVector[]> polygon = new ArrayList<PVector[]>();
+    for (PVector[] tri : badTriangles) {
+      for (int i = 0; i < 3; i++) {
+        PVector[] edge = new PVector[]{tri[i], tri[(i + 1) % 3]};
+        boolean shared = false;
+        
+        for (PVector[] other : badTriangles) {
+          if (other == tri) continue;
+          if (hasEdge(other, edge)) {
+            shared = true;
+            break;
+          }
+        }
+        
+        if (!shared) {
+          polygon.add(edge);
+        }
+      }
+    }
+    
+    // Remove bad triangles
+    tempTriangles.removeAll(badTriangles);
+    
+    // Re-triangulate the hole
+    for (PVector[] edge : polygon) {
+      tempTriangles.add(new PVector[]{edge[0], edge[1], point});
+    }
+  }
+  
+  // Remove triangles that share vertices with super-triangle
+  for (PVector[] tri : tempTriangles) {
+    boolean valid = true;
+    for (PVector v : tri) {
+      if (v == p1 || v == p2 || v == p3) {
+        valid = false;
+        break;
+      }
+    }
+    
+    if (valid) {
+      // Apply distance threshold filter
+      float d1 = dist(tri[0].x, tri[0].y, tri[1].x, tri[1].y);
+      float d2 = dist(tri[1].x, tri[1].y, tri[2].x, tri[2].y);
+      float d3 = dist(tri[2].x, tri[2].y, tri[0].x, tri[0].y);
+      
+      if (d1 <= triangleThreshold && d2 <= triangleThreshold && d3 <= triangleThreshold) {
+        triangles.add(tri);
+        
+        // Calculate and store centroid (Phase 3)
+        PVector centroid = calcCentroid(tri);
+        centroids.add(centroid);
+      }
+    }
+  }
+}
+
+// Check if point is inside the circumcircle of a triangle
+boolean isPointInCircumcircle(PVector p, PVector[] tri) {
+  float ax = tri[0].x, ay = tri[0].y;
+  float bx = tri[1].x, by = tri[1].y;
+  float cx = tri[2].x, cy = tri[2].y;
+  
+  float d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+  if (abs(d) < 0.0001) return false;
+  
+  float ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
+  float uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
+  
+  float radius = dist(ux, uy, ax, ay);
+  float distToPoint = dist(ux, uy, p.x, p.y);
+  
+  return distToPoint <= radius;
+}
+
+// Check if triangle has a specific edge
+boolean hasEdge(PVector[] tri, PVector[] edge) {
+  for (int i = 0; i < 3; i++) {
+    PVector a = tri[i];
+    PVector b = tri[(i + 1) % 3];
+    if ((a == edge[0] && b == edge[1]) || (a == edge[1] && b == edge[0])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// === PHASE 3: CENTROID CALCULATION ===
+PVector calcCentroid(PVector[] tri) {
+  float cx = (tri[0].x + tri[1].x + tri[2].x) / 3.0;
+  float cy = (tri[0].y + tri[1].y + tri[2].y) / 3.0;
+  return new PVector(cx, cy);
+}
+
+// Calculate orientation angle of a triangle (for future pentagon rotation)
+float calcOrientation(PVector[] tri) {
+  // Use the angle of the first edge (A→B)
+  return atan2(tri[1].y - tri[0].y, tri[1].x - tri[0].x);
+}
+
+// Draw the Delaunay triangulation
+void drawTriangles() {
+  stroke(triangleColor);
+  strokeWeight(1);
+  noFill();
+  
+  for (PVector[] tri : triangles) {
+    beginShape();
+    vertex(tri[0].x, tri[0].y);
+    vertex(tri[1].x, tri[1].y);
+    vertex(tri[2].x, tri[2].y);
+    endShape(CLOSE);
+  }
+}
+
+// Draw the centroids
+void drawCentroids() {
+  fill(centroidColor);
+  noStroke();
+  
+  for (PVector centro : centroids) {
+    ellipse(centro.x, centro.y, 6, 6);
+  }
+}
+
+// === PHASE 5-6: PENTAGON MESH GENERATION ===
+void generatePentagonMesh() {
+  pentagonCells.clear();
+  
+  if (centroids.size() == 0) {
+    println("No centroids available. Make sure you have at least 3 nodes.");
+    return;
+  }
+  
+  // Find primary pole (center of mass of all nodes) for gradient effect
+  PVector primaryPole = new PVector(0, 0);
+  for (Node n : nodes) {
+    primaryPole.x += n.x;
+    primaryPole.y += n.y;
+  }
+  primaryPole.x /= nodes.size();
+  primaryPole.y /= nodes.size();
+  
+  // Calculate max distance for gradient
+  float maxDist = 0;
+  for (PVector c : centroids) {
+    float d = dist(c.x, c.y, primaryPole.x, primaryPole.y);
+    maxDist = max(maxDist, d);
+  }
+  
+  // Generate a pentagon for each centroid
+  for (int i = 0; i < centroids.size(); i++) {
+    PVector centro = centroids.get(i);
+    PVector[] tri = triangles.get(i);
+    float orientation = calcOrientation(tri);
+    
+    // Calculate local density (Phase 6)
+    float density = getLocalDensity(centro, 100);
+    
+    // Adjust radius based on density if enabled
+    float radius = pentagonRadius;
+    if (useDensityGradient) {
+      // More dense = smaller pentagons, less dense = larger
+      radius = map(density, 0, 10, pentagonRadius * 1.3, pentagonRadius * 0.7);
+      
+      // Also adjust based on distance from primary pole
+      float distFromPole = dist(centro.x, centro.y, primaryPole.x, primaryPole.y);
+      float distFactor = map(distFromPole, 0, maxDist, 1.2, 0.8);
+      radius *= distFactor;
+    }
+    
+    PentagonCell cell = new PentagonCell(centro.x, centro.y, radius, orientation, density);
+    pentagonCells.add(cell);
+  }
+  
+  meshGenerated = true;
+  println("Generated " + pentagonCells.size() + " pentagons");
+}
+
+// Calculate local node density around a point
+float getLocalDensity(PVector point, float searchRadius) {
+  int count = 0;
+  for (Node n : nodes) {
+    if (dist(point.x, point.y, n.x, n.y) <= searchRadius) {
+      count++;
+    }
+  }
+  return count;
+}
+
+// Draw all pentagon cells
+void drawPentagonMesh() {
+  // Find primary pole for gradient effect
+  PVector primaryPole = new PVector(0, 0);
+  for (Node n : nodes) {
+    primaryPole.x += n.x;
+    primaryPole.y += n.y;
+  }
+  if (nodes.size() > 0) {
+    primaryPole.x /= nodes.size();
+    primaryPole.y /= nodes.size();
+  }
+  
+  // Calculate max distance
+  float maxDist = 0;
+  for (PentagonCell cell : pentagonCells) {
+    float d = dist(cell.center.x, cell.center.y, primaryPole.x, primaryPole.y);
+    maxDist = max(maxDist, d);
+  }
+  if (maxDist == 0) maxDist = 1;
+  
+  // Draw each pentagon
+  for (PentagonCell cell : pentagonCells) {
+    if (useDensityGradient) {
+      cell.displayWithGradient(primaryPole, maxDist);
+    } else {
+      cell.display();
+    }
+  }
+}
+
+// Regenerate pentagons with current settings (called when sliders change)
+void updatePentagonMesh() {
+  if (!meshGenerated || pentagonCells.size() == 0) return;
+  
+  for (int i = 0; i < pentagonCells.size(); i++) {
+    PentagonCell cell = pentagonCells.get(i);
+    PVector[] tri = triangles.get(i);
+    float orientation = calcOrientation(tri);
+    
+    // Recalculate radius
+    float radius = pentagonRadius;
+    if (useDensityGradient) {
+      float density = cell.localDensity;
+      radius = map(density, 0, 10, pentagonRadius * 1.3, pentagonRadius * 0.7);
+    }
+    
+    cell.update(radius, orientation);
+  }
+}
+
+// Clear the pentagon mesh
+void clearPentagonMesh() {
+  pentagonCells.clear();
+  meshGenerated = false;
+}
+
 void drawNodes() {
   for (Node node : nodes) {
     // Outer glow
@@ -390,6 +732,57 @@ void drawControlPanel() {
   drawSlider(px + margin, yPos, panelWidth - 2*margin, phiTension, 1.0, 2.0, tealColor, false);
   yPos += 38;
   
+  // Triangle Threshold slider (Phase 2)
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(14);
+  text("Triangle Threshold:", px + margin, yPos);
+  textFont(fontBold);
+  fill(#3b82f6);  // Blue for triangulation
+  textAlign(RIGHT);
+  textSize(16);
+  text(str(int(triangleThreshold)) + "px", px + panelWidth - margin, yPos);
+  textAlign(LEFT);
+  yPos += 24;
+  
+  thresholdSliderY = yPos;
+  drawSlider(px + margin, yPos, panelWidth - 2*margin, triangleThreshold, 50, 400, #3b82f6, false);
+  yPos += 32;
+  
+  // Show Triangles checkbox
+  triangleCheckboxY = yPos;
+  fill(showTriangles ? #3b82f6 : #64748b);
+  noStroke();
+  rect(px + margin, yPos - 12, 18, 18, 3);
+  if (showTriangles) {
+    fill(bgColor);
+    textFont(fontBold);
+    textSize(14);
+    text("✓", px + margin + 3, yPos + 2);
+  }
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(13);
+  text("Show Triangles (" + triangles.size() + ")", px + margin + 28, yPos);
+  yPos += 26;
+  
+  // Show Centroids checkbox
+  centroidCheckboxY = yPos;
+  fill(showCentroids ? #ec4899 : #64748b);  // Pink for centroids
+  noStroke();
+  rect(px + margin, yPos - 12, 18, 18, 3);
+  if (showCentroids) {
+    fill(bgColor);
+    textFont(fontBold);
+    textSize(14);
+    text("✓", px + margin + 3, yPos + 2);
+  }
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(13);
+  text("Show Centroids (" + centroids.size() + ")", px + margin + 28, yPos);
+  yPos += 32;
+  
   // Checkbox - Show Historic Map (only enabled in template mode)
   checkboxY = yPos;
   boolean mapCheckboxEnabled = templateMode && historicMapImage != null;
@@ -411,27 +804,122 @@ void drawControlPanel() {
   
   textFont(fontRegular);
   fill(mapCheckboxEnabled ? #cbd5e1 : disabledColor);
-  textSize(14);
+  textSize(13);
   text("Show Historic Map", px + margin + 28, yPos);
   
   // Show hint if disabled
   if (!templateMode) {
     fill(#64748b);
     textSize(9);
-    text("(select a form first)", px + margin + 28, yPos + 14);
+    text("(select a form first)", px + margin + 28, yPos + 12);
   }
-  yPos += 45;
+  yPos += 35;
   
   // Separator
   stroke(#334155);
-  line(px + margin, yPos - 18, px + panelWidth - margin, yPos - 18);
+  line(px + margin, yPos - 12, px + panelWidth - margin, yPos - 12);
+  
+  // Section: Pentagon Mesh (Phase 5-6)
+  textFont(fontBold);
+  fill(textColor);
+  textSize(13);
+  text("PENTAGON MESH", px + margin, yPos);
+  yPos += 25;
+  
+  // Generate Mesh Button
+  generateMeshBtnY = yPos;
+  boolean canGenerate = centroids.size() > 0;
+  if (canGenerate) {
+    fill(meshGenerated ? #22c55e : #8b5cf6);  // Green if generated, purple otherwise
+  } else {
+    fill(#334155);
+  }
+  noStroke();
+  rect(px + margin, yPos, panelWidth - 2*margin, 32, 6);
+  textFont(fontBold);
+  fill(canGenerate ? textColor : disabledColor);
+  textSize(12);
+  textAlign(CENTER);
+  String meshBtnText = meshGenerated ? "Regenerate Mesh (" + pentagonCells.size() + ")" : "Generate Mesh";
+  text(meshBtnText, px + panelWidth/2, yPos + 21);
+  textAlign(LEFT);
+  yPos += 42;
+  
+  // Pentagon Radius slider
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(13);
+  text("Pentagon Radius:", px + margin, yPos);
+  textFont(fontBold);
+  fill(#f59e0b);  // Amber
+  textAlign(RIGHT);
+  textSize(14);
+  text(str(int(pentagonRadius)) + "px", px + panelWidth - margin, yPos);
+  textAlign(LEFT);
+  yPos += 20;
+  
+  pentagonRadiusSliderY = yPos;
+  drawSlider(px + margin, yPos, panelWidth - 2*margin, pentagonRadius, 15, 80, #f59e0b, false);
+  yPos += 30;
+  
+  // Deformation slider
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(13);
+  text("Deformation:", px + margin, yPos);
+  textFont(fontBold);
+  fill(#f59e0b);
+  textAlign(RIGHT);
+  textSize(14);
+  text(nf(deformationLevel, 1, 2), px + panelWidth - margin, yPos);
+  textAlign(LEFT);
+  yPos += 20;
+  
+  deformationSliderY = yPos;
+  drawSlider(px + margin, yPos, panelWidth - 2*margin, deformationLevel, 0, 0.4, #f59e0b, false);
+  yPos += 28;
+  
+  // Show Pentagons checkbox
+  pentagonCheckboxY = yPos;
+  fill(showPentagons ? #f59e0b : #64748b);
+  noStroke();
+  rect(px + margin, yPos - 12, 18, 18, 3);
+  if (showPentagons) {
+    fill(bgColor);
+    textFont(fontBold);
+    textSize(14);
+    text("✓", px + margin + 3, yPos + 2);
+  }
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(12);
+  text("Show Pentagons", px + margin + 28, yPos);
+  
+  // Density gradient checkbox (inline)
+  fill(useDensityGradient ? #f59e0b : #64748b);
+  rect(px + margin + 140, yPos - 12, 18, 18, 3);
+  if (useDensityGradient) {
+    fill(bgColor);
+    textFont(fontBold);
+    textSize(14);
+    text("✓", px + margin + 143, yPos + 2);
+  }
+  textFont(fontRegular);
+  fill(#cbd5e1);
+  textSize(12);
+  text("Gradient", px + margin + 165, yPos);
+  yPos += 30;
+  
+  // Separator
+  stroke(#334155);
+  line(px + margin, yPos - 8, px + panelWidth - margin, yPos - 8);
   
   // Section: Analysis Output
   textFont(fontBold);
   fill(textColor);
   textSize(13);
   text("OUTPUT ANALYSIS", px + margin, yPos);
-  yPos += 28;
+  yPos += 25;
   
   int boxW = (panelWidth - 3*margin) / 2;
   int boxH = 70;
@@ -759,12 +1247,77 @@ void mousePressed() {
     return;
   }
   
-  // Checkbox - only works in template mode with a map image
+  // Triangle threshold slider
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
+      mouseY > thresholdSliderY - 10 && mouseY < thresholdSliderY + 10) {
+    float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
+    triangleThreshold = map(pct, 0, 1, 50, 400);
+    return;
+  }
+  
+  // Show Triangles checkbox
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + 18 &&
+      mouseY > triangleCheckboxY - 12 && mouseY < triangleCheckboxY + 6) {
+    showTriangles = !showTriangles;
+    return;
+  }
+  
+  // Show Centroids checkbox
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + 18 &&
+      mouseY > centroidCheckboxY - 12 && mouseY < centroidCheckboxY + 6) {
+    showCentroids = !showCentroids;
+    return;
+  }
+  
+  // Checkbox - Show Historic Map (only works in template mode with a map image)
   if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + 18 &&
       mouseY > checkboxY - 12 && mouseY < checkboxY + 6) {
     if (templateMode && historicMapImage != null) {
       showHistoricMap = !showHistoricMap;
     }
+    return;
+  }
+  
+  // Generate Mesh button
+  if (mouseX > px + sliderMargin && mouseX < px + panelWidth - sliderMargin &&
+      mouseY > generateMeshBtnY && mouseY < generateMeshBtnY + 32) {
+    if (centroids.size() > 0) {
+      generatePentagonMesh();
+    }
+    return;
+  }
+  
+  // Pentagon Radius slider
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
+      mouseY > pentagonRadiusSliderY - 10 && mouseY < pentagonRadiusSliderY + 10) {
+    float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
+    pentagonRadius = map(pct, 0, 1, 15, 80);
+    updatePentagonMesh();
+    return;
+  }
+  
+  // Deformation slider
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + sliderWidth &&
+      mouseY > deformationSliderY - 10 && mouseY < deformationSliderY + 10) {
+    float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
+    deformationLevel = map(pct, 0, 1, 0, 0.4);
+    // Regenerate mesh with new deformation
+    if (meshGenerated) generatePentagonMesh();
+    return;
+  }
+  
+  // Show Pentagons checkbox
+  if (mouseX > px + sliderMargin && mouseX < px + sliderMargin + 18 &&
+      mouseY > pentagonCheckboxY - 12 && mouseY < pentagonCheckboxY + 6) {
+    showPentagons = !showPentagons;
+    return;
+  }
+  
+  // Density Gradient checkbox
+  if (mouseX > px + sliderMargin + 140 && mouseX < px + sliderMargin + 158 &&
+      mouseY > pentagonCheckboxY - 12 && mouseY < pentagonCheckboxY + 6) {
+    useDensityGradient = !useDensityGradient;
+    updatePentagonMesh();
     return;
   }
   
@@ -829,6 +1382,29 @@ void mouseDragged() {
   if (mouseY > phiSliderY - 20 && mouseY < phiSliderY + 20) {
     float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
     phiTension = map(pct, 0, 1, 1.0, 2.0);
+    return;
+  }
+  
+  // Triangle threshold slider
+  if (mouseY > thresholdSliderY - 20 && mouseY < thresholdSliderY + 20) {
+    float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
+    triangleThreshold = map(pct, 0, 1, 50, 400);
+    return;
+  }
+  
+  // Pentagon Radius slider
+  if (mouseY > pentagonRadiusSliderY - 20 && mouseY < pentagonRadiusSliderY + 20) {
+    float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
+    pentagonRadius = map(pct, 0, 1, 15, 80);
+    updatePentagonMesh();
+    return;
+  }
+  
+  // Deformation slider
+  if (mouseY > deformationSliderY - 20 && mouseY < deformationSliderY + 20) {
+    float pct = constrain((mouseX - (px + sliderMargin)) / sliderWidth, 0, 1);
+    deformationLevel = map(pct, 0, 1, 0, 0.4);
+    // Note: deformation requires regenerating mesh since radii are randomized
   }
 }
 
@@ -878,6 +1454,46 @@ void keyPressed() {
     if (templateMode && historicMapImage != null) {
       showHistoricMap = !showHistoricMap;
     }
+  }
+  
+  // Toggle triangles visibility
+  if (key == 't' || key == 'T') {
+    showTriangles = !showTriangles;
+  }
+  
+  // Toggle centroids visibility (d for dots)
+  if (key == 'd' || key == 'D') {
+    showCentroids = !showCentroids;
+  }
+  
+  // Adjust triangle threshold with [ and ]
+  if (key == '[') {
+    triangleThreshold = max(50, triangleThreshold - 20);
+  }
+  if (key == ']') {
+    triangleThreshold = min(400, triangleThreshold + 20);
+  }
+  
+  // Toggle pentagons visibility
+  if (key == 'p' || key == 'P') {
+    showPentagons = !showPentagons;
+  }
+  
+  // Generate/regenerate pentagon mesh
+  if (key == 'g' || key == 'G') {
+    if (centroids.size() > 0) {
+      generatePentagonMesh();
+    }
+  }
+  
+  // Adjust pentagon radius with - and =
+  if (key == '-' || key == '_') {
+    pentagonRadius = max(15, pentagonRadius - 5);
+    updatePentagonMesh();
+  }
+  if (key == '=' || key == '+') {
+    pentagonRadius = min(80, pentagonRadius + 5);
+    updatePentagonMesh();
   }
   
   // Delete last
@@ -1006,6 +1622,7 @@ void exitTemplateMode() {
   historicMapImage = null;
   showHistoricMap = false;
   connectionsPerNode = 2;  // Reset to default for free mode
+  clearPentagonMesh();
 }
 
 void clearCanvas() {
@@ -1015,6 +1632,7 @@ void clearCanvas() {
   } else {
     nodes.clear();
   }
+  clearPentagonMesh();
 }
 
 // === HELPER FUNCTIONS ===
@@ -1068,11 +1686,89 @@ void exportJSON() {
   }
   export.setInt("connectionsPerNode", connectionsPerNode);
   export.setFloat("phiTension", phiTension);
+  export.setFloat("triangleThreshold", triangleThreshold);
   export.setJSONArray("nodes", jsonNodes);
+  
+  // Export triangles (Phase 2)
+  JSONArray jsonTriangles = new JSONArray();
+  for (int i = 0; i < triangles.size(); i++) {
+    PVector[] tri = triangles.get(i);
+    JSONObject triObj = new JSONObject();
+    JSONArray verts = new JSONArray();
+    for (int j = 0; j < 3; j++) {
+      JSONObject v = new JSONObject();
+      v.setFloat("x", tri[j].x);
+      v.setFloat("y", tri[j].y);
+      verts.setJSONObject(j, v);
+    }
+    triObj.setJSONArray("vertices", verts);
+    
+    // Include centroid and orientation for this triangle
+    PVector centro = centroids.get(i);
+    triObj.setFloat("centroidX", centro.x);
+    triObj.setFloat("centroidY", centro.y);
+    triObj.setFloat("orientation", calcOrientation(tri));
+    
+    jsonTriangles.setJSONObject(i, triObj);
+  }
+  export.setJSONArray("triangles", jsonTriangles);
+  
+  // Export centroids separately for convenience (Phase 3)
+  JSONArray jsonCentroids = new JSONArray();
+  for (int i = 0; i < centroids.size(); i++) {
+    PVector c = centroids.get(i);
+    JSONObject centObj = new JSONObject();
+    centObj.setFloat("x", c.x);
+    centObj.setFloat("y", c.y);
+    centObj.setFloat("orientation", calcOrientation(triangles.get(i)));
+    jsonCentroids.setJSONObject(i, centObj);
+  }
+  export.setJSONArray("centroids", jsonCentroids);
+  
+  // Export pentagons (Phase 5-6) - for Grasshopper/Rhino
+  export.setFloat("pentagonRadius", pentagonRadius);
+  export.setFloat("deformationLevel", deformationLevel);
+  
+  JSONArray jsonPentagons = new JSONArray();
+  for (int i = 0; i < pentagonCells.size(); i++) {
+    PentagonCell cell = pentagonCells.get(i);
+    JSONObject cellObj = new JSONObject();
+    
+    // Center position
+    cellObj.setFloat("cx", cell.center.x);
+    cellObj.setFloat("cy", cell.center.y);
+    cellObj.setFloat("radius", cell.baseRadius);
+    cellObj.setFloat("rotation", cell.rotation);
+    cellObj.setFloat("density", cell.localDensity);
+    
+    // 5 vertices for direct use in Grasshopper
+    JSONArray verts = new JSONArray();
+    for (int j = 0; j < 5; j++) {
+      JSONObject v = new JSONObject();
+      v.setFloat("x", cell.vertices[j].x);
+      v.setFloat("y", cell.vertices[j].y);
+      verts.setJSONObject(j, v);
+    }
+    cellObj.setJSONArray("vertices", verts);
+    
+    // Individual radii (for deformation reconstruction)
+    JSONArray radii = new JSONArray();
+    for (int j = 0; j < 5; j++) {
+      radii.setFloat(j, cell.radii[j]);
+    }
+    cellObj.setJSONArray("radii", radii);
+    
+    jsonPentagons.setJSONObject(i, cellObj);
+  }
+  export.setJSONArray("pentagons", jsonPentagons);
   
   String filename = "portolan_export_" + year() + nf(month(),2) + nf(day(),2) + "_" + nf(hour(),2) + nf(minute(),2) + ".json";
   saveJSONObject(export, filename);
   println("Exported to: " + filename);
+  println("  - " + nodes.size() + " nodes");
+  println("  - " + triangles.size() + " triangles");
+  println("  - " + centroids.size() + " centroids");
+  println("  - " + pentagonCells.size() + " pentagons");
 }
 
 // === CLASSES ===
@@ -1125,5 +1821,85 @@ class TemplateFile {
     this.imagePath = imagePath;
     this.category = category;
     this.categoryPath = categoryPath;
+  }
+}
+
+// === PHASE 5-6: PENTAGON CELL CLASS ===
+class PentagonCell {
+  PVector center;           // Centroid position
+  float baseRadius;         // Base radius before deformation
+  float rotation;           // Orientation from triangle
+  PVector[] vertices;       // 5 vertices of the pentagon
+  float[] radii;            // Individual radius for each vertex (for deformation)
+  float localDensity;       // Local node density (affects size)
+  
+  PentagonCell(float cx, float cy, float r, float rot, float density) {
+    this.center = new PVector(cx, cy);
+    this.baseRadius = r;
+    this.rotation = rot;
+    this.localDensity = density;
+    this.vertices = new PVector[5];
+    this.radii = new float[5];
+    
+    initRadii();
+    calculateVertices();
+  }
+  
+  // Initialize radii with deformation
+  void initRadii() {
+    for (int i = 0; i < 5; i++) {
+      // Apply deformation: 1.0 = no deformation, range based on deformationLevel
+      float minR = 1.0 - deformationLevel;
+      float maxR = 1.0 + deformationLevel;
+      radii[i] = random(minR, maxR);
+    }
+  }
+  
+  // Calculate the 5 vertices based on center, radius, rotation, and deformation
+  void calculateVertices() {
+    for (int i = 0; i < 5; i++) {
+      float angle = rotation + i * TWO_PI / 5.0;
+      float r = baseRadius * radii[i];
+      vertices[i] = new PVector(
+        center.x + r * cos(angle),
+        center.y + r * sin(angle)
+      );
+    }
+  }
+  
+  // Recalculate with new parameters
+  void update(float newRadius, float newRotation) {
+    this.baseRadius = newRadius;
+    this.rotation = newRotation;
+    calculateVertices();
+  }
+  
+  // Draw the pentagon
+  void display() {
+    stroke(pentagonStroke);
+    strokeWeight(1.2);
+    fill(pentagonFill);
+    
+    beginShape();
+    for (int i = 0; i < 5; i++) {
+      vertex(vertices[i].x, vertices[i].y);
+    }
+    endShape(CLOSE);
+  }
+  
+  // Draw with distance-based opacity (Phase 6 gradient effect)
+  void displayWithGradient(PVector primaryPole, float maxDist) {
+    float distFromPole = dist(center.x, center.y, primaryPole.x, primaryPole.y);
+    float alpha = map(distFromPole, 0, maxDist, 255, 60);
+    
+    stroke(pentagonStroke, alpha);
+    strokeWeight(1.2);
+    fill(pentagonStroke, alpha * 0.04);
+    
+    beginShape();
+    for (int i = 0; i < 5; i++) {
+      vertex(vertices[i].x, vertices[i].y);
+    }
+    endShape(CLOSE);
   }
 }
