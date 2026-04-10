@@ -96,7 +96,7 @@ int pentagonCheckboxY = 595;
 
 void setup() {
   pixelDensity(1);
-  size(1200, 800);
+  size(1500, 700);
   smooth(8);
   
   fontBold = createFont("SansSerif.bold", 32);
@@ -154,10 +154,26 @@ void draw() {
   }
   
   drawNodes();
+  drawCursorPosition();
   drawControlPanel();
   
   if (showTemplateSelector) {
     drawTemplateSelector();
+  }
+}
+
+// === DRAW CURSOR POSITION ===
+void drawCursorPosition() {
+  if (mouseX < canvasWidth) {
+    fill(0, 0, 0, 180);
+    noStroke();
+    rect(10, height - 30, 140, 24, 4);
+    
+    fill(#00ff88);
+    textFont(fontBold);
+    textSize(14);
+    textAlign(LEFT);
+    text("X: " + mouseX + "  Y: " + mouseY, 18, height - 12);
   }
 }
 
