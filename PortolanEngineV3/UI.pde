@@ -1,5 +1,11 @@
-// ControlP5-based UI for the Processing port. All widgets live in a single
-// control column to the right of the drawing canvas, split into two cards:
+// Hybrid UI for the Processing port.
+//
+// Numeric inputs (triSize, tau, lambda, etc.) use our own DragSlider class —
+// see DragSlider.pde. ControlP5's Slider/Numberbox drag UX was unintuitive
+// enough that we replaced it with a custom widget. Everything else (buttons,
+// toggles, the graph-type dropdown) still uses ControlP5 where it works well.
+//
+// Layout: one right-hand control column split into two cards:
 //   • "Graphical Encoding": graph-type dropdown, per-type size slider(s),
 //     Clear / Export JSON / Export SVG / Import JSON buttons.
 //   • "Decoded Pattern":   τ slider, λ slider, Show Packing / Show Tiling
@@ -45,6 +51,20 @@ final int UI_DEC_H   = 288;                      // height of decoded-pattern ca
 // Inner padding inside each card (text/widgets kept off the rounded border).
 final int UI_CARD_PAD_X = 14;
 final int UI_CARD_PAD_Y_TOP = 46; // leaves room for the title bar + separator
+
+// All DragSliders live here so PortolanEngineV3.pde can iterate them for
+// drawing and mouse dispatch, and syncUIFromApp() can toggle visibility.
+HashMap<String, DragSlider> sliders = new HashMap<String, DragSlider>();
+
+// Create a DragSlider, register it in `sliders`, and return it for chaining.
+DragSlider addSlider(String name, int x, int y, int w,
+                     float min, float max, float value,
+                     int decimals, boolean integerSnap, String label) {
+  DragSlider s = new DragSlider(name, x, y, w, 22,
+    min, max, value, decimals, integerSnap, label);
+  sliders.put(name, s);
+  return s;
+}
 
 void styleCaption(Controller c) {
   if (c == null) return;
@@ -92,30 +112,17 @@ void buildUI(ControlP5 cp, PortolanApp a) {
     .setValue(a.graphKind);
   y += 24 + 22; // bar height + spacing for slider caption above
 
-  // Per-type parameter sliders occupy the same slot; only one is visible at a time.
-  styleCaption(cp.addSlider(W_TRI_SIZE)
-    .setPosition(colX, y).setSize(colW, rowH)
-    .setRange(5, 15).setNumberOfTickMarks(11)
-    .setValue(a.triSz).setCaptionLabel("Size"));
-  styleCaption(cp.addSlider(W_KING_SIZE)
-    .setPosition(colX, y).setSize(colW, rowH)
-    .setRange(5, 12).setNumberOfTickMarks(8)
-    .setValue(a.kSz).setCaptionLabel("Size"));
-  styleCaption(cp.addSlider(W_SPI_LAYERS)
-    .setPosition(colX, y).setSize(colW, rowH)
-    .setRange(3, 8).setNumberOfTickMarks(6)
-    .setValue(a.sLay).setCaptionLabel("Layers"));
-  styleCaption(cp.addSlider(W_SPI_POINTS)
-    .setPosition(colX, y + rowH + 20).setSize(colW, rowH)
-    .setRange(8, 20).setNumberOfTickMarks(13)
-    .setValue(a.sPt).setCaptionLabel("Points per Layer"));
-  styleCaption(cp.addSlider(W_RAND_PTS)
-    .setPosition(colX, y).setSize(colW, rowH)
-    .setRange(10, 100)
-    .setValue(a.rN).setCaptionLabel("Number of Points"));
+  // Per-type parameter sliders. Only one (or one pair) is visible at a time;
+  // syncUIFromApp() toggles `visible` based on the selected graph kind. All
+  // four int sliders share the same slot, and the spider-graph adds a
+  // second row below for "Points per Layer".
+  addSlider(W_TRI_SIZE,   colX, y, colW, 5, 15,  a.triSz, 0, true, "Size");
+  addSlider(W_KING_SIZE,  colX, y, colW, 5, 12,  a.kSz,   0, true, "Size");
+  addSlider(W_SPI_LAYERS, colX, y, colW, 3, 8,   a.sLay,  0, true, "Layers");
+  addSlider(W_SPI_POINTS, colX, y + rowH + 20, colW, 8, 20, a.sPt, 0, true, "Points per Layer");
+  addSlider(W_RAND_PTS,   colX, y, colW, 10, 100, a.rN,   0, true, "Number of Points");
   // Reserve space for two slider rows regardless of graph kind so the Clear
-  // button below never moves / collides when "Triangulated Spider Graph"
-  // (which exposes a second slider) is selected.
+  // button below never moves when switching between graph types.
   y += rowH + 20 + rowH + 14;
 
   // Graph buttons
@@ -132,14 +139,11 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // ===================================================================
   y = UI_ENC_Y2 + 12 + UI_CARD_PAD_Y_TOP;
 
-  styleCaption(cp.addSlider(W_TAU)
-    .setPosition(colX, y).setSize(colW, rowH)
-    .setRange(0.7f, 0.9f).setValue(a.tau).setCaptionLabel("tau (star size)"));
-  y += rowH + 30;
-  styleCaption(cp.addSlider(W_LAMBDA)
-    .setPosition(colX, y).setSize(colW, rowH)
-    .setRange(0.3f, 0.5f).setValue(a.lambda).setCaptionLabel("lambda (sharpness)"));
-  y += rowH + 24;
+  // Float sliders — 2 decimal places, no integer snap.
+  addSlider(W_TAU,    colX, y, colW, 0.7f, 0.9f, a.tau,    2, false, "tau (star size)");
+  y += rowH + 22;
+  addSlider(W_LAMBDA, colX, y, colW, 0.3f, 0.5f, a.lambda, 2, false, "lambda (sharpness)");
+  y += rowH + 18;
 
   Toggle togPack = cp.addToggle(W_SHOW_PACK)
     .setPosition(colX, y).setSize(18, 18)
@@ -170,19 +174,74 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   if (gt != null) gt.bringToFront();
 }
 
-// Adjust widget visibility based on the current graph kind.
+// Adjust slider visibility based on the current graph kind.
 void syncUIFromApp(ControlP5 cp, PortolanApp a) {
-  setVisible(cp, W_TRI_SIZE,   a.graphKind == 0);
-  setVisible(cp, W_KING_SIZE,  a.graphKind == 1);
-  setVisible(cp, W_SPI_LAYERS, a.graphKind == 2);
-  setVisible(cp, W_SPI_POINTS, a.graphKind == 2);
-  setVisible(cp, W_RAND_PTS,   a.graphKind == 3);
+  setSliderVisible(W_TRI_SIZE,   a.graphKind == 0);
+  setSliderVisible(W_KING_SIZE,  a.graphKind == 1);
+  setSliderVisible(W_SPI_LAYERS, a.graphKind == 2);
+  setSliderVisible(W_SPI_POINTS, a.graphKind == 2);
+  setSliderVisible(W_RAND_PTS,   a.graphKind == 3);
 }
 
-void setVisible(ControlP5 cp, String name, boolean visible) {
-  Controller c = cp.getController(name);
-  if (c == null) return;
-  if (visible) c.show(); else c.hide();
+void setSliderVisible(String name, boolean visible) {
+  DragSlider s = sliders.get(name);
+  if (s != null) s.visible = visible;
+}
+
+// Route a DragSlider value change to the app. Mirrors what the old
+// numberbox branch of controlEvent() used to do — when the slider name
+// affects graph topology we call app.setGraph() so the mesh is regenerated.
+void onSliderChange(DragSlider s) {
+  if (app == null) return;
+  String n = s.name;
+  float v = s.value;
+  if (n.equals(W_TRI_SIZE))        { app.triSz = (int) v; if (app.graphKind == 0) app.setGraph(0); }
+  else if (n.equals(W_KING_SIZE))  { app.kSz   = (int) v; if (app.graphKind == 1) app.setGraph(1); }
+  else if (n.equals(W_SPI_LAYERS)) { app.sLay  = (int) v; if (app.graphKind == 2) app.setGraph(2); }
+  else if (n.equals(W_SPI_POINTS)) { app.sPt   = (int) v; if (app.graphKind == 2) app.setGraph(2); }
+  else if (n.equals(W_RAND_PTS))   { app.rN    = (int) v; if (app.graphKind == 3) app.setGraph(3); }
+  else if (n.equals(W_TAU))        { app.tau    = v; }
+  else if (n.equals(W_LAMBDA))     { app.lambda = v; }
+}
+
+// True when the graph-type dropdown is currently expanded. We suppress
+// slider hit-testing in that case so clicks on the dropdown's list items
+// don't also drag a slider underneath.
+boolean isDropdownOpen() {
+  if (cp5 == null) return false;
+  Controller c = cp5.getController(W_GRAPH_TYPE);
+  if (c instanceof ScrollableList) return ((ScrollableList) c).isOpen();
+  return false;
+}
+
+// Forward mouse events to any DragSlider that wants them. Returns true if
+// a slider consumed the event (in which case PortolanApp should NOT see it).
+boolean slidersMousePressed(float mx, float my) {
+  if (isDropdownOpen()) return false;
+  for (DragSlider s : sliders.values()) {
+    if (s.press(mx, my)) { onSliderChange(s); return true; }
+  }
+  return false;
+}
+
+boolean slidersMouseDragged(float mx, float my) {
+  boolean any = false;
+  for (DragSlider s : sliders.values()) {
+    if (s.drag(mx, my)) { onSliderChange(s); any = true; }
+  }
+  return any;
+}
+
+boolean slidersMouseReleased() {
+  boolean any = false;
+  for (DragSlider s : sliders.values()) {
+    if (s.release()) any = true;
+  }
+  return any;
+}
+
+void drawSliders(PApplet p) {
+  for (DragSlider s : sliders.values()) s.draw(p);
 }
 
 // Pending-graph-export flags so SVG/JSON file dialogs run asynchronously
@@ -201,25 +260,6 @@ void controlEvent(ControlEvent ce) {
     app.graphKind = constrain(idx, 0, 3);
     syncUIFromApp(cp5, app);
     app.setGraph(app.graphKind);
-  } else if (n.equals(W_TRI_SIZE)) {
-    app.triSz = (int) ce.getValue();
-    if (app.graphKind == 0) app.setGraph(0);
-  } else if (n.equals(W_KING_SIZE)) {
-    app.kSz = (int) ce.getValue();
-    if (app.graphKind == 1) app.setGraph(1);
-  } else if (n.equals(W_SPI_LAYERS)) {
-    app.sLay = (int) ce.getValue();
-    if (app.graphKind == 2) app.setGraph(2);
-  } else if (n.equals(W_SPI_POINTS)) {
-    app.sPt = (int) ce.getValue();
-    if (app.graphKind == 2) app.setGraph(2);
-  } else if (n.equals(W_RAND_PTS)) {
-    app.rN = (int) ce.getValue();
-    if (app.graphKind == 3) app.setGraph(3);
-  } else if (n.equals(W_TAU)) {
-    app.tau = ce.getValue();
-  } else if (n.equals(W_LAMBDA)) {
-    app.lambda = ce.getValue();
   } else if (n.equals(W_SHOW_PACK)) {
     app.shPack = ce.getValue() > 0.5f;
   } else if (n.equals(W_SHOW_TILE)) {

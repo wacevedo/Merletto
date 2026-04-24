@@ -10,14 +10,30 @@ String setupError = null;
 
 void settings() {
   size(WINDOW_W, CANVAS_H);
-  pixelDensity(PIXEL_DENSITY);
+  // Use the display's native density (2 on Retina, 1 otherwise). pixelDensity
+  // silently caps at whatever the device supports, so asking for the actual
+  // display density gives us the crispest output without surprises.
+  pixelDensity(displayDensity());
+  // smooth(N): N = samples per pixel for MSAA. 2 is the Processing default;
+  // 8 is the max and gives the nicest edges on strokes and glyphs.
+  smooth(8);
 }
 
 void setup() {
   try {
+    // Real TTF font for the sketch. Processing's default (a tiny bitmap
+    // "Lucida Sans") pixelates badly once you scale it. createFont loads a
+    // system TrueType font which is then rendered through the vector path,
+    // so glyph edges get antialiased together with the rest of the scene.
+    PFont uiFont = createFont("Helvetica", 14, true);
+    textFont(uiFont);
+
     app = new PortolanApp(this);
     app.xOff = LEFT_PANEL_W;
     cp5 = new ControlP5(this);
+    // Apply the same font to every ControlP5 widget caption / value label so
+    // slider labels, button titles, and numberbox values are crisp too.
+    cp5.setFont(uiFont, 11);
     buildUI(cp5, app);
     app.runSetup();
     syncUIFromApp(cp5, app);
@@ -61,7 +77,11 @@ void draw() {
     textAlign(LEFT, BASELINE);
     text("drawAll() error: " + t.getClass().getSimpleName() + " — " + t.getMessage(), 20, 30);
   }
-  // ControlP5 auto-renders after draw().
+
+  // Our custom sliders are painted after the canvas drawing but before
+  // ControlP5's auto-render so they end up below the dropdown's expanded
+  // list. ControlP5 auto-renders its own widgets after draw() returns.
+  drawSliders(this);
 }
 
 // Draw a single card: rounded-ish rectangle with a section title at the top.
@@ -82,8 +102,12 @@ void drawPanelCard(int x, int y, int w, int h, String title) {
   noStroke();
 }
 
-// Mouse events are forwarded to the app only when the cursor is inside the
-// canvas strip. ControlP5 handles clicks on its own widgets.
+// Mouse dispatch order on every event:
+//   1. DragSliders get first crack (they live in the right panel).
+//   2. If no slider consumed it, and the click is inside the drawing canvas,
+//      forward to PortolanApp.
+//   3. ControlP5 handles clicks on its own widgets through its own listener
+//      registration — we don't forward to it manually.
 boolean inCanvas() {
   return mouseX >= LEFT_PANEL_W
     && mouseX < LEFT_PANEL_W + CANVAS_W
@@ -91,7 +115,20 @@ boolean inCanvas() {
     && mouseY < CANVAS_H;
 }
 
-void mousePressed()  { if (app != null && inCanvas()) { app.mouseP(); redraw(); } }
-void mouseDragged()  { if (app != null && inCanvas()) { app.mouseD(); redraw(); } }
-void mouseReleased() { if (app != null)               { app.mouseR(); redraw(); } }
-void keyPressed()    { if (app != null) { app.key(key); redraw(); } }
+void mousePressed() {
+  if (slidersMousePressed(mouseX, mouseY)) { redraw(); return; }
+  if (app != null && inCanvas()) { app.mouseP(); redraw(); }
+}
+
+void mouseDragged() {
+  if (slidersMouseDragged(mouseX, mouseY)) { redraw(); return; }
+  if (app != null && inCanvas()) { app.mouseD(); redraw(); }
+}
+
+void mouseReleased() {
+  boolean wasSlider = slidersMouseReleased();
+  if (wasSlider) { redraw(); return; }
+  if (app != null) { app.mouseR(); redraw(); }
+}
+
+void keyPressed() { if (app != null) { app.key(key); redraw(); } }

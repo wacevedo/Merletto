@@ -7,7 +7,8 @@
 final int CANVAS_W = 1200;
 final int CANVAS_H = 800;
 final int GRID_SIZE = 5;
-final int PIXEL_DENSITY = 2;
+// Rendering density is now selected at runtime via displayDensity() inside
+// settings(), so we no longer expose a hard-coded PIXEL_DENSITY here.
 
 // UI side panel (right-hand column only). Mesh draws at canvas-local coords
 // 0..CANVAS_W so no translation is needed; the control column lives in
