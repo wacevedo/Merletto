@@ -39,6 +39,17 @@ final String W_EXP_FULL   = "exportFullSvg";
 // grey panel background. ControlP5's default caption color is white.
 final int UI_LABEL_COLOR = 0xff222222;
 
+// Labels shown in the "Graph Type" dropdown. Order must match the indices
+// used by PortolanApp.setGraph()/graphKind (0=triangular, 1=king, 2=spider,
+// 3=random). Stored as a field so controlEvent() can look up the current
+// selection's display name when refreshing the dropdown's bar caption.
+final String[] GRAPH_TYPE_LABELS = {
+  "Triangular Grid Graph",
+  "King's Graph",
+  "Triangulated Spider Graph",
+  "Random Delaunay Triangulation"
+};
+
 // ===== Layout constants (referenced by PortolanEngineV3.pde's card-drawing) =====
 // The right column is 340px wide. Each card is inset 12px on each side.
 final int UI_CARD_X  = CANVAS_W + 12;
@@ -94,12 +105,7 @@ void buildUI(ControlP5 cp, PortolanApp a) {
     .setColorValue(UI_LABEL_COLOR);
   y += 16;
 
-  java.util.List<String> graphItems = java.util.Arrays.asList(
-    "Triangular Grid Graph",
-    "King's Graph",
-    "Triangulated Spider Graph",
-    "Random Delaunay Triangulation"
-  );
+  java.util.List<String> graphItems = java.util.Arrays.asList(GRAPH_TYPE_LABELS);
   cp.addScrollableList(W_GRAPH_TYPE)
     .setPosition(colX, y)
     .setSize(colW, 110)
@@ -110,6 +116,10 @@ void buildUI(ControlP5 cp, PortolanApp a) {
     .setOpen(false)
     .close()
     .setValue(a.graphKind);
+  // ScrollableList uses the caption label as the text shown on the collapsed
+  // bar, not the selected item. Seed it with the initial graph-type name;
+  // controlEvent() updates it whenever the user picks a new option.
+  setGraphTypeBarLabel(cp, a.graphKind);
   y += 24 + 22; // bar height + spacing for slider caption above
 
   // Per-type parameter sliders. Only one (or one pair) is visible at a time;
@@ -178,6 +188,16 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // renders in add order, so later additions otherwise paint above it).
   Controller gt = cp.getController(W_GRAPH_TYPE);
   if (gt != null) gt.bringToFront();
+}
+
+// Update the collapsed dropdown bar so it reads the currently selected
+// graph type's display name instead of ControlP5's default caption.
+void setGraphTypeBarLabel(ControlP5 cp, int idx) {
+  if (cp == null) return;
+  Controller c = cp.getController(W_GRAPH_TYPE);
+  if (c == null) return;
+  int safe = constrain(idx, 0, GRAPH_TYPE_LABELS.length - 1);
+  c.setCaptionLabel(GRAPH_TYPE_LABELS[safe]);
 }
 
 // Adjust slider visibility based on the current graph kind.
@@ -280,7 +300,13 @@ void controlEvent(ControlEvent ce) {
 
   if (n.equals(W_GRAPH_TYPE)) {
     int idx = (int) ce.getValue();
-    app.graphKind = constrain(idx, 0, 3);
+    app.graphKind = constrain(idx, 0, GRAPH_TYPE_LABELS.length - 1);
+    setGraphTypeBarLabel(cp5, app.graphKind);
+    // Collapse the list immediately after a selection. ControlP5's
+    // ScrollableList keeps the list open after a click by default, which
+    // leaves it obscuring the sliders below.
+    Controller gt = cp5.getController(W_GRAPH_TYPE);
+    if (gt instanceof ScrollableList) ((ScrollableList) gt).close();
     syncUIFromApp(cp5, app);
     app.setGraph(app.graphKind);
   } else if (n.equals(W_SHOW_PACK)) {
