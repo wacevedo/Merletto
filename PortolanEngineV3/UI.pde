@@ -1,8 +1,8 @@
-// ControlP5-based UI for the Processing port. Mirrors the HTML panels of
-// the original constelation/ project:
-//   • Left  "Graphical Encoding": graph-type dropdown, per-type slider(s),
-//     Clear/Export JSON/Export SVG/Import JSON buttons.
-//   • Right "Decoded Pattern": τ slider, λ slider, Show Packing / Show Tiling
+// ControlP5-based UI for the Processing port. All widgets live in a single
+// control column to the right of the drawing canvas, split into two cards:
+//   • "Graphical Encoding": graph-type dropdown, per-type size slider(s),
+//     Clear / Export JSON / Export SVG / Import JSON buttons.
+//   • "Decoded Pattern":   τ slider, λ slider, Show Packing / Show Tiling
 //     toggles, Export Pattern SVG / Export Full SVG buttons.
 
 import java.io.File;
@@ -29,20 +29,51 @@ final String W_SHOW_TILE  = "showTiling";
 final String W_EXP_PAT    = "exportPatternSvg";
 final String W_EXP_FULL   = "exportFullSvg";
 
-void buildUI(ControlP5 cp, PortolanApp a) {
-  // Shared styling
-  int rowH = 22;
-  int btnH = 28;
-  int pad = 12;
-  int panelX = pad;
-  int panelW = LEFT_PANEL_W - pad * 2;
-  int rightX = LEFT_PANEL_W + CANVAS_W + pad;
-  int rightW = RIGHT_PANEL_W - pad * 2;
+// Dark text color for widget captions so they're legible on the light
+// grey panel background. ControlP5's default caption color is white.
+final int UI_LABEL_COLOR = 0xff222222;
 
-  // ===== LEFT PANEL =====
-  int y = 60;
-  cp.addLabel("lbl_graphType").setText("Graph Type").setPosition(panelX, y).setColorValue(0xff333333);
-  y += 18;
+// ===== Layout constants (referenced by PortolanEngineV3.pde's card-drawing) =====
+// The right column is 340px wide. Each card is inset 12px on each side.
+final int UI_CARD_X  = CANVAS_W + 12;
+final int UI_CARD_W  = RIGHT_PANEL_W - 24;       // 316
+final int UI_ENC_Y1  = 12;                       // top of "Graphical Encoding" card
+final int UI_ENC_H   = 340;                      // height of encoding card
+final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap) → 352
+final int UI_DEC_H   = 288;                      // height of decoded-pattern card
+
+// Inner padding inside each card (text/widgets kept off the rounded border).
+final int UI_CARD_PAD_X = 14;
+final int UI_CARD_PAD_Y_TOP = 46; // leaves room for the title bar + separator
+
+void styleCaption(Controller c) {
+  if (c == null) return;
+  c.getCaptionLabel()
+    .align(ControlP5.LEFT, ControlP5.TOP_OUTSIDE)
+    .setPaddingX(0)
+    .setColor(UI_LABEL_COLOR);
+}
+
+void buildUI(ControlP5 cp, PortolanApp a) {
+  int rowH = 22;
+  int btnH = 26;
+  int gap  = 8;
+
+  int colX = UI_CARD_X + UI_CARD_PAD_X;
+  int colW = UI_CARD_W - UI_CARD_PAD_X * 2;
+
+  // ===================================================================
+  // Card 1 — "Graphical Encoding"
+  // ===================================================================
+  int y = UI_ENC_Y1 + UI_CARD_PAD_Y_TOP;
+
+  // Static label for the dropdown (ControlP5 Label renders as text only).
+  cp.addLabel("lbl_graphType")
+    .setText("Graph Type")
+    .setPosition(colX, y)
+    .setColorValue(UI_LABEL_COLOR);
+  y += 16;
+
   java.util.List<String> graphItems = java.util.Arrays.asList(
     "Triangular Grid Graph",
     "King's Graph",
@@ -50,70 +81,93 @@ void buildUI(ControlP5 cp, PortolanApp a) {
     "Random Delaunay Triangulation"
   );
   cp.addScrollableList(W_GRAPH_TYPE)
-    .setPosition(panelX, y)
-    .setSize(panelW, 110)
-    .setBarHeight(22)
-    .setItemHeight(20)
+    .setPosition(colX, y)
+    .setSize(colW, 110)
+    .setBarHeight(24)
+    .setItemHeight(22)
     .addItems(graphItems)
     .setType(ControlP5.LIST)
     .setOpen(false)
     .close()
     .setValue(a.graphKind);
-  y += 30;
+  y += 24 + 22; // bar height + spacing for slider caption above
 
-  // Per-type parameter sliders (all created; visibility toggled by syncUIFromApp)
-  cp.addSlider(W_TRI_SIZE)
-    .setPosition(panelX, y).setSize(panelW, rowH)
+  // Per-type parameter sliders occupy the same slot; only one is visible at a time.
+  styleCaption(cp.addSlider(W_TRI_SIZE)
+    .setPosition(colX, y).setSize(colW, rowH)
     .setRange(5, 15).setNumberOfTickMarks(11)
-    .setValue(a.triSz).setCaptionLabel("Size (tri)");
-  cp.addSlider(W_KING_SIZE)
-    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setValue(a.triSz).setCaptionLabel("Size"));
+  styleCaption(cp.addSlider(W_KING_SIZE)
+    .setPosition(colX, y).setSize(colW, rowH)
     .setRange(5, 12).setNumberOfTickMarks(8)
-    .setValue(a.kSz).setCaptionLabel("Size (king)");
-  cp.addSlider(W_SPI_LAYERS)
-    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setValue(a.kSz).setCaptionLabel("Size"));
+  styleCaption(cp.addSlider(W_SPI_LAYERS)
+    .setPosition(colX, y).setSize(colW, rowH)
     .setRange(3, 8).setNumberOfTickMarks(6)
-    .setValue(a.sLay).setCaptionLabel("Spider Layers");
-  cp.addSlider(W_SPI_POINTS)
-    .setPosition(panelX, y + rowH + 8).setSize(panelW, rowH)
+    .setValue(a.sLay).setCaptionLabel("Layers"));
+  styleCaption(cp.addSlider(W_SPI_POINTS)
+    .setPosition(colX, y + rowH + 20).setSize(colW, rowH)
     .setRange(8, 20).setNumberOfTickMarks(13)
-    .setValue(a.sPt).setCaptionLabel("Points per Layer");
-  cp.addSlider(W_RAND_PTS)
-    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setValue(a.sPt).setCaptionLabel("Points per Layer"));
+  styleCaption(cp.addSlider(W_RAND_PTS)
+    .setPosition(colX, y).setSize(colW, rowH)
     .setRange(10, 100)
-    .setValue(a.rN).setCaptionLabel("Number of Points");
+    .setValue(a.rN).setCaptionLabel("Number of Points"));
+  // Reserve space for two slider rows regardless of graph kind so the Clear
+  // button below never moves / collides when "Triangulated Spider Graph"
+  // (which exposes a second slider) is selected.
+  y += rowH + 20 + rowH + 14;
 
   // Graph buttons
-  y = 170;
-  cp.addButton(W_CLEAR).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Clear Graph");
-  y += btnH + 8;
-  cp.addButton(W_EXP_JSON).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Export Graph  (JSON)");
-  y += btnH + 8;
-  cp.addButton(W_EXP_GSVG).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Export Graph  (SVG)");
-  y += btnH + 8;
-  cp.addButton(W_IMP_JSON).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Import Graph  (JSON)");
+  cp.addButton(W_CLEAR)   .setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Clear Graph");
+  y += btnH + gap;
+  cp.addButton(W_EXP_JSON).setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Graph  (JSON)");
+  y += btnH + gap;
+  cp.addButton(W_EXP_GSVG).setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Graph  (SVG)");
+  y += btnH + gap;
+  cp.addButton(W_IMP_JSON).setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Import Graph  (JSON)");
 
-  // ===== RIGHT PANEL =====
-  y = 60;
-  cp.addSlider(W_TAU)
-    .setPosition(rightX, y).setSize(rightW, rowH)
-    .setRange(0.7f, 0.9f).setValue(a.tau).setCaptionLabel("tau (star size)");
-  y += rowH + 18;
-  cp.addSlider(W_LAMBDA)
-    .setPosition(rightX, y).setSize(rightW, rowH)
-    .setRange(0.3f, 0.5f).setValue(a.lambda).setCaptionLabel("lambda (sharpness)");
+  // ===================================================================
+  // Card 2 — "Decoded Pattern"
+  // ===================================================================
+  y = UI_ENC_Y2 + 12 + UI_CARD_PAD_Y_TOP;
+
+  styleCaption(cp.addSlider(W_TAU)
+    .setPosition(colX, y).setSize(colW, rowH)
+    .setRange(0.7f, 0.9f).setValue(a.tau).setCaptionLabel("tau (star size)"));
+  y += rowH + 30;
+  styleCaption(cp.addSlider(W_LAMBDA)
+    .setPosition(colX, y).setSize(colW, rowH)
+    .setRange(0.3f, 0.5f).setValue(a.lambda).setCaptionLabel("lambda (sharpness)"));
   y += rowH + 24;
-  cp.addToggle(W_SHOW_PACK)
-    .setPosition(rightX, y).setSize(18, 18)
-    .setValue(a.shPack).setCaptionLabel("Show Packing").setMode(ControlP5.DEFAULT);
-  y += 34;
-  cp.addToggle(W_SHOW_TILE)
-    .setPosition(rightX, y).setSize(18, 18)
-    .setValue(a.shTile).setCaptionLabel("Show Tiling").setMode(ControlP5.DEFAULT);
-  y += 50;
-  cp.addButton(W_EXP_PAT).setPosition(rightX, y).setSize(rightW, btnH).setCaptionLabel("Export Pattern  (SVG)");
-  y += btnH + 8;
-  cp.addButton(W_EXP_FULL).setPosition(rightX, y).setSize(rightW, btnH).setCaptionLabel("Export Full  (SVG)");
+
+  Toggle togPack = cp.addToggle(W_SHOW_PACK)
+    .setPosition(colX, y).setSize(18, 18)
+    .setValue(a.shPack).setMode(ControlP5.DEFAULT)
+    .setCaptionLabel("Show Packing");
+  togPack.getCaptionLabel()
+    .align(ControlP5.RIGHT_OUTSIDE, ControlP5.CENTER)
+    .setPaddingX(8)
+    .setColor(UI_LABEL_COLOR);
+  y += 28;
+  Toggle togTile = cp.addToggle(W_SHOW_TILE)
+    .setPosition(colX, y).setSize(18, 18)
+    .setValue(a.shTile).setMode(ControlP5.DEFAULT)
+    .setCaptionLabel("Show Tiling");
+  togTile.getCaptionLabel()
+    .align(ControlP5.RIGHT_OUTSIDE, ControlP5.CENTER)
+    .setPaddingX(8)
+    .setColor(UI_LABEL_COLOR);
+  y += 36;
+
+  cp.addButton(W_EXP_PAT) .setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Pattern  (SVG)");
+  y += btnH + gap;
+  cp.addButton(W_EXP_FULL).setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Full  (SVG)");
+
+  // Keep the dropdown's expanded list on top of every other widget (ControlP5
+  // renders in add order, so later additions otherwise paint above it).
+  Controller gt = cp.getController(W_GRAPH_TYPE);
+  if (gt != null) gt.bringToFront();
 }
 
 // Adjust widget visibility based on the current graph kind.

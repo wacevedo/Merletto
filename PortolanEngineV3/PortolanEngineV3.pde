@@ -31,20 +31,16 @@ void setup() {
 
 void draw() {
   background(245);
-  // Side-panel backgrounds.
+
+  // Right control column background.
   noStroke();
-  fill(236, 239, 241);
-  rect(0, 0, LEFT_PANEL_W, CANVAS_H);
-  rect(LEFT_PANEL_W + CANVAS_W, 0, RIGHT_PANEL_W, CANVAS_H);
-  // Panel titles (ControlP5 labels overlay these — we still paint the header strip).
-  fill(255);
-  rect(0, 0, LEFT_PANEL_W, 40);
-  rect(LEFT_PANEL_W + CANVAS_W, 0, RIGHT_PANEL_W, 40);
-  fill(40);
-  textSize(14);
-  textAlign(LEFT, CENTER);
-  text("Graphical Encoding", 16, 20);
-  text("Decoded Pattern", LEFT_PANEL_W + CANVAS_W + 16, 20);
+  fill(247);
+  rect(CANVAS_W, 0, RIGHT_PANEL_W, CANVAS_H);
+
+  // Two cards ("Graphical Encoding" + "Decoded Pattern"). Coordinates must
+  // stay in sync with UI.pde's layout constants below.
+  drawPanelCard(CANVAS_W + 12, 12, RIGHT_PANEL_W - 24, UI_ENC_H, "Graphical Encoding");
+  drawPanelCard(CANVAS_W + 12, UI_ENC_Y2 + 12, RIGHT_PANEL_W - 24, UI_DEC_H, "Decoded Pattern");
 
   if (app == null) {
     fill(200, 0, 0);
@@ -53,8 +49,6 @@ void draw() {
     return;
   }
 
-  pushMatrix();
-  translate(LEFT_PANEL_W, 0);
   try {
     app.drawAll();
   } catch (Throwable t) {
@@ -67,8 +61,25 @@ void draw() {
     textAlign(LEFT, BASELINE);
     text("drawAll() error: " + t.getClass().getSimpleName() + " — " + t.getMessage(), 20, 30);
   }
-  popMatrix();
   // ControlP5 auto-renders after draw().
+}
+
+// Draw a single card: rounded-ish rectangle with a section title at the top.
+void drawPanelCard(int x, int y, int w, int h, String title) {
+  noStroke();
+  fill(255);
+  rect(x, y, w, h, 6);
+  stroke(222);
+  noFill();
+  rect(x, y, w, h, 6);
+  noStroke();
+  fill(40);
+  textSize(13);
+  textAlign(LEFT, CENTER);
+  text(title, x + 14, y + 20);
+  stroke(232);
+  line(x + 10, y + 36, x + w - 10, y + 36);
+  noStroke();
 }
 
 // Mouse events are forwarded to the app only when the cursor is inside the

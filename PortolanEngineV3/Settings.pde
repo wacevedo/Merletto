@@ -9,11 +9,14 @@ final int CANVAS_H = 800;
 final int GRID_SIZE = 5;
 final int PIXEL_DENSITY = 2;
 
-// UI side panels (absolute window coords). The drawing area is translated
-// right by LEFT_PANEL_W so mesh coords (0..CANVAS_W, 0..CANVAS_H) stay local.
-final int LEFT_PANEL_W = 300;
-final int RIGHT_PANEL_W = 300;
-final int WINDOW_W = LEFT_PANEL_W + CANVAS_W + RIGHT_PANEL_W;
+// UI side panel (right-hand column only). Mesh draws at canvas-local coords
+// 0..CANVAS_W so no translation is needed; the control column lives in
+// absolute window coords to the right of the drawing area.
+final int RIGHT_PANEL_W = 340;
+final int WINDOW_W = CANVAS_W + RIGHT_PANEL_W;
+// Legacy name retained so PortolanApp's mouse offset stays 0 (drawing starts
+// at x=0). The controls now live entirely on the right.
+final int LEFT_PANEL_W = 0;
 
 // Pattern parameters
 final float TAU_DEFAULT = 0.85f;
