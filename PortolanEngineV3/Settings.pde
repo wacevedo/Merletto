@@ -23,6 +23,12 @@ final int LEFT_PANEL_W = 0;
 final float TAU_DEFAULT = 0.85f;
 final float LAMBDA_DEFAULT = 0.42f;
 
+// Flip DEBUG_LOG to true when diagnosing Mesh / setGraph behavior. It's
+// kept off by default because each println flushes to the Processing
+// console synchronously and those flushes dominate the frame time when
+// dragging a slider across an integer range.
+final boolean DEBUG_LOG = false;
+
 // Graph defaults
 final int TRI_SIZE_DEF = 10;
 final int KING_SIZE_DEF = 10;

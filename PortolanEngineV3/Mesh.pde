@@ -33,9 +33,17 @@ class Mesh {
     return vert.get(i);
   }
 
+  // NOTE on recompute(): addConstraint, setPoint, and removePoint used to
+  // call recompute() internally. That forced an O(N²) full CDT + circle
+  // packing pass for every single mutation. In practice every caller of
+  // these methods already either (a) marks the mesh dirty and lets the
+  // next draw run a single recompute, or (b) calls mesh.recompute()
+  // explicitly after a batch of mutations (e.g. PortolanApp.setGraph adds
+  // dozens of constraints then recomputes once). Letting callers own the
+  // recompute makes a 15x15 triangular grid ~50x faster to build.
+
   void setPoint(int i, GPoint p) {
     vert.set(i, p);
-    recompute();
   }
 
   void removePoint(int i) {
@@ -49,43 +57,38 @@ class Mesh {
       ncon.add(new int[] {a, b});
     }
     conEdge = ncon;
-    recompute();
   }
 
   void addConstraint(int i, int j) {
     conEdge.add(new int[] {i, j});
-    recompute();
   }
 
   void recompute() {
-    long t0 = System.currentTimeMillis();
-    println("      [MESH] recompute start. pts=" + vert.size() + " cons=" + conEdge.size());
+    long t0 = DEBUG_LOG ? System.currentTimeMillis() : 0;
+    if (DEBUG_LOG) println("      [MESH] recompute start. pts=" + vert.size() + " cons=" + conEdge.size());
     vertProps.clear();
     for (int idx = 0; idx < vert.size(); ++idx) {
       vertProps.add(new VertProperty());
     }
     if (vert.size() >= 3) {
-      long t1 = System.currentTimeMillis();
-      println("      [MESH] calling delaunay()");
+      long t1 = DEBUG_LOG ? System.currentTimeMillis() : 0;
       delaunay();
-      println("      [MESH] delaunay done in " + (System.currentTimeMillis() - t1) + "ms. tris=" + tri.size());
+      if (DEBUG_LOG) println("      [MESH] delaunay done in " + (System.currentTimeMillis() - t1) + "ms. tris=" + tri.size());
       if (conEdge.size() > 0) {
-        long t2 = System.currentTimeMillis();
-        println("      [MESH] calling constrainEdges()");
+        long t2 = DEBUG_LOG ? System.currentTimeMillis() : 0;
         constrainEdges();
-        println("      [MESH] constrainEdges done in " + (System.currentTimeMillis() - t2) + "ms");
+        if (DEBUG_LOG) println("      [MESH] constrainEdges done in " + (System.currentTimeMillis() - t2) + "ms");
       }
-      long t3 = System.currentTimeMillis();
+      long t3 = DEBUG_LOG ? System.currentTimeMillis() : 0;
       calcGraphStructure();
-      println("      [MESH] calcGraphStructure done in " + (System.currentTimeMillis() - t3) + "ms");
+      if (DEBUG_LOG) println("      [MESH] calcGraphStructure done in " + (System.currentTimeMillis() - t3) + "ms");
       if (vert.size() >= 3) {
-        long t4 = System.currentTimeMillis();
-        println("      [MESH] calling calcCirclePacking()");
+        long t4 = DEBUG_LOG ? System.currentTimeMillis() : 0;
         calcCirclePacking();
-        println("      [MESH] calcCirclePacking done in " + (System.currentTimeMillis() - t4) + "ms");
+        if (DEBUG_LOG) println("      [MESH] calcCirclePacking done in " + (System.currentTimeMillis() - t4) + "ms");
       }
     }
-    println("      [MESH] recompute total=" + (System.currentTimeMillis() - t0) + "ms");
+    if (DEBUG_LOG) println("      [MESH] recompute total=" + (System.currentTimeMillis() - t0) + "ms");
   }
 
   void setupDelaunay() {
@@ -135,6 +138,7 @@ class Mesh {
         int[] res = findEnclosingTriangle(pNew, indTri);
         indTri = res[0];
         if (indTri < 0) {
+          // Always log this one — it only fires on a real failure, not per frame.
           println("      [MESH] delaunay: findEnclosingTriangle failed at newI=" + newI
             + " pt=(" + pNew.x + "," + pNew.y + ") vertSize=" + vert.size() + " triSize=" + tri.size());
           throw new RuntimeException("Could not find a triangle containing the new vertex (idx=" + newI + ")");
@@ -600,7 +604,7 @@ class Mesh {
       }
       iter++;
     }
-    println("      [MESH] circlePack iterations=" + iter + " lastChange=" + lastChange);
+    if (DEBUG_LOG) println("      [MESH] circlePack iterations=" + iter + " lastChange=" + lastChange);
     Integer k1 = internal.keySet().iterator().next();
     java.util.HashMap<Integer, GPoint> placements = new java.util.HashMap<Integer, GPoint>();
     placements.put(k1, new GPoint(0, 0));

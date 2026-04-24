@@ -27,6 +27,14 @@ class DragSlider {
   boolean visible = true;
   boolean dragging = false;
 
+  // When true (default), onSliderChange fires on every drag tick so the
+  // mesh/pattern update continuously while you scrub. When false, it fires
+  // only on release — useful for sliders whose change triggers expensive
+  // work (e.g. a full mesh.recompute after setGraph).
+  boolean liveUpdate = true;
+
+  DragSlider setLiveUpdate(boolean v) { this.liveUpdate = v; return this; }
+
   // Styling constants (matched to UI.pde's palette).
   final int TRACK_COLOR    = 0xffd0d4d8;
   final int FILL_COLOR     = 0xff4a90e2;

@@ -116,11 +116,17 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // syncUIFromApp() toggles `visible` based on the selected graph kind. All
   // four int sliders share the same slot, and the spider-graph adds a
   // second row below for "Points per Layer".
-  addSlider(W_TRI_SIZE,   colX, y, colW, 5, 15,  a.triSz, 0, true, "Size");
-  addSlider(W_KING_SIZE,  colX, y, colW, 5, 12,  a.kSz,   0, true, "Size");
-  addSlider(W_SPI_LAYERS, colX, y, colW, 3, 8,   a.sLay,  0, true, "Layers");
-  addSlider(W_SPI_POINTS, colX, y + rowH + 20, colW, 8, 20, a.sPt, 0, true, "Points per Layer");
-  addSlider(W_RAND_PTS,   colX, y, colW, 10, 100, a.rN,   0, true, "Number of Points");
+  //
+  // setLiveUpdate(false): changing graph topology runs mesh.recompute()
+  // (CDT + circle packing, which iterates up to 2000 times). We don't want
+  // to pay that cost on every pixel of drag, so these commit only when the
+  // user lets go of the thumb. The slider number still updates live as you
+  // drag so you see exactly where you'll land.
+  addSlider(W_TRI_SIZE,   colX, y, colW, 5, 15,  a.triSz, 0, true, "Size").setLiveUpdate(false);
+  addSlider(W_KING_SIZE,  colX, y, colW, 5, 12,  a.kSz,   0, true, "Size").setLiveUpdate(false);
+  addSlider(W_SPI_LAYERS, colX, y, colW, 3, 8,   a.sLay,  0, true, "Layers").setLiveUpdate(false);
+  addSlider(W_SPI_POINTS, colX, y + rowH + 20, colW, 8, 20, a.sPt, 0, true, "Points per Layer").setLiveUpdate(false);
+  addSlider(W_RAND_PTS,   colX, y, colW, 10, 100, a.rN,   0, true, "Number of Points").setLiveUpdate(false);
   // Reserve space for two slider rows regardless of graph kind so the Clear
   // button below never moves when switching between graph types.
   y += rowH + 20 + rowH + 14;
@@ -216,10 +222,18 @@ boolean isDropdownOpen() {
 
 // Forward mouse events to any DragSlider that wants them. Returns true if
 // a slider consumed the event (in which case PortolanApp should NOT see it).
+//
+// Live-update sliders (τ, λ) fire onSliderChange on every press/drag so the
+// pattern redraws continuously. Deferred sliders (the size sliders) skip
+// those callbacks and only fire onSliderChange on release — the number in
+// the caption still updates live because drag() mutates `value` directly.
 boolean slidersMousePressed(float mx, float my) {
   if (isDropdownOpen()) return false;
   for (DragSlider s : sliders.values()) {
-    if (s.press(mx, my)) { onSliderChange(s); return true; }
+    if (s.press(mx, my)) {
+      if (s.liveUpdate) onSliderChange(s);
+      return true;
+    }
   }
   return false;
 }
@@ -227,7 +241,10 @@ boolean slidersMousePressed(float mx, float my) {
 boolean slidersMouseDragged(float mx, float my) {
   boolean any = false;
   for (DragSlider s : sliders.values()) {
-    if (s.drag(mx, my)) { onSliderChange(s); any = true; }
+    if (s.drag(mx, my)) {
+      if (s.liveUpdate) onSliderChange(s);
+      any = true;
+    }
   }
   return any;
 }
@@ -235,7 +252,13 @@ boolean slidersMouseDragged(float mx, float my) {
 boolean slidersMouseReleased() {
   boolean any = false;
   for (DragSlider s : sliders.values()) {
-    if (s.release()) any = true;
+    // Capture whether this slider was dragging *before* release() resets it,
+    // so we know to fire a deferred commit.
+    boolean wasDragging = s.dragging;
+    if (s.release()) {
+      any = true;
+      if (!s.liveUpdate && wasDragging) onSliderChange(s);
+    }
   }
   return any;
 }

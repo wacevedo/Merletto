@@ -20,18 +20,17 @@ class PortolanApp {
   java.util.ArrayList<Pent> p5 = new java.util.ArrayList<Pent>();
 
   PortolanApp(PApplet p) {
-    println("  [LOG] PortolanApp ctor start");
     pa = p;
     mesh = new Mesh();
     mode = 0;
     graphKind = 0;
-    println("  [LOG] PortolanApp ctor end: grid=" + grid + " drawW=" + drawW + " drawH=" + drawH + " tau=" + tau + " lambda=" + lambda);
+    if (DEBUG_LOG) println("  [LOG] PortolanApp ctor done: grid=" + grid + " tau=" + tau + " lambda=" + lambda);
   }
 
   void runSetup() {
-    println("  [LOG] runSetup() calling setGraph(0)");
     setGraph(0);
-    println("  [LOG] runSetup() setGraph done. points=" + mesh.numPoints() + " tris=" + mesh.tri.size() + " conEdges=" + mesh.conEdge.size());
+    if (DEBUG_LOG) println("  [LOG] runSetup: points=" + mesh.numPoints()
+      + " tris=" + mesh.tri.size() + " conEdges=" + mesh.conEdge.size());
   }
 
   int vtxCol(int idx, int tot) {
@@ -48,35 +47,23 @@ class PortolanApp {
   boolean meshDirty = true;
   void markMeshDirty() { meshDirty = true; }
 
-  int drawCallCount = 0;
   void drawAll() {
-    drawCallCount++;
-    boolean verbose = drawCallCount <= 2;
-    if (verbose) println("    [LOG] drawAll#" + drawCallCount + " start. mesh=" + (mesh == null ? "NULL" : "ok"));
     if (mesh == null) return;
     if (meshDirty) {
-      if (verbose) println("    [LOG] drawAll: before recompute");
       mesh.recompute();
       meshDirty = false;
-      if (verbose) println("    [LOG] drawAll: after recompute points=" + mesh.numPoints() + " tris=" + mesh.tri.size());
     }
     pCirc.clear();
     pCyc.clear();
     p5.clear();
     pa.background(255);
-    if (verbose) println("    [LOG] drawAll: before drawL");
     drawL();
-    if (verbose) println("    [LOG] drawAll: before pack");
     pack();
-    if (verbose) println("    [LOG] drawAll: after pack pCirc=" + pCirc.size() + " pCyc=" + pCyc.size());
     for (CycP q : pCyc.values()) { if (shTile) q.dT(pa); }
     for (CycP q : pCyc.values()) { q.cE(lambda, (a, b) -> { }); }
-    if (verbose) println("    [LOG] drawAll: before cB3");
     p5 = cB3(mesh, pCirc, pCyc, tau);
-    if (verbose) println("    [LOG] drawAll: after cB3 pents=" + p5.size());
     for (CycP q : pCyc.values()) { q.dM(pa, lambda); }
     for (Pent t : p5) { t.cE(lambda, (a, b) -> { pa.pushStyle(); pa.stroke(220, 90, 80); pa.line(a.x, a.y, b.x, b.y); pa.popStyle(); }); }
-    if (verbose) println("    [LOG] drawAll#" + drawCallCount + " DONE");
   }
 
   void drawL() {
@@ -241,7 +228,6 @@ class PortolanApp {
   }
 
   void setGraph(int k) {
-    println("    [LOG] setGraph(" + k + ") start");
     graphKind = k;
     mesh = new Mesh();
     int margin = 4 * grid, sp = 8 * grid;
@@ -249,15 +235,12 @@ class PortolanApp {
     if (k == 0) {
       int n = triSz, rows = n, cols = n;
       float gw = (cols - 1) * sp, gh = (rows - 1) * sp, sx = cx - gw / 2, sy = cy - gh / 2;
-      println("    [LOG] setGraph(0): grid " + rows + "x" + cols + " sp=" + sp + " sx=" + sx + " sy=" + sy);
       int[][] g = new int[rows][cols];
       for (int i = 0; i < rows; i++) for (int j = 0; j < cols; j++) { int v = mesh.vert.size(); g[i][j] = v; mesh.addPoint(new GPoint(sx + j * sp, sy + i * sp)); }
-      println("    [LOG] setGraph(0): points added=" + mesh.numPoints());
       for (int j = 0; j < cols - 1; j++) mesh.addConstraint(g[0][j], g[0][j + 1]);
       for (int j = 0; j < cols - 1; j++) mesh.addConstraint(g[rows - 1][j], g[rows - 1][j + 1]);
       for (int i = 0; i < rows - 1; i++) mesh.addConstraint(g[i][0], g[i + 1][0]);
       for (int i = 0; i < rows - 1; i++) mesh.addConstraint(g[i][cols - 1], g[i + 1][cols - 1]);
-      println("    [LOG] setGraph(0): constraints added=" + mesh.conEdge.size());
     } else if (k == 1) {
       int n = kSz, rows = n, cols = n;
       float gw = (cols - 1) * sp, gh = (rows - 1) * sp, sx = cx - gw / 2, sy = cy - gh / 2;
@@ -275,9 +258,9 @@ class PortolanApp {
         mesh.addPoint(new GPoint(rx, ry));
       }
     }
-    println("    [LOG] setGraph(" + k + "): calling mesh.recompute()");
     mesh.recompute();
     meshDirty = false; // recompute() we just ran is authoritative
-    println("    [LOG] setGraph(" + k + ") done. points=" + mesh.numPoints() + " tris=" + mesh.tri.size());
+    if (DEBUG_LOG) println("    [LOG] setGraph(" + k + "): points=" + mesh.numPoints()
+      + " tris=" + mesh.tri.size());
   }
 }
