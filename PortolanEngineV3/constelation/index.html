@@ -1,0 +1,258 @@
+<html lang="en" class="fa-events-icons-ready">
+
+<head>
+  <meta charset="utf-8">
+
+  <script src="p5.js"></script>
+  <script src="p5.svg.js"></script>
+
+  <!-- styling -->
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <script src="https://use.fontawesome.com/7819f4c8ce.js"></script>
+  <link href="https://use.fontawesome.com/7819f4c8ce.css" media="all" rel="stylesheet">
+
+  <!-- fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300&amp;display=swap" rel="stylesheet">
+
+  <title>Constellation Patterns</title>
+</head>
+
+<body>
+  <script src="settings.js"></script>
+  <script src="geometry.js" async=""></script>
+  <script src="cdt.js" async=""></script>
+
+  <script src="helpers.js" async=""></script>
+  <script src="patch.js" async=""></script>
+
+  <div class="container">
+    <h1>Patterns</h1>
+
+    <div id="canvas-wrapper">
+      <div id="app">
+        <div id="loading-indicator" style="display: none">
+          <div class="loading-spinner"></div>
+          <div class="loading-text">Computing...</div>
+        </div>
+        <canvas id="defaultCanvas0" class="p5Canvas" style="width: 1200px; height: 600px; display: none;" width="2400"
+          height="1200"></canvas>
+      </div>
+
+      <div class="canvas-controls">
+        <div class="control-panel left-panel">
+          <div class="panel-header">
+            <h3 class="canvas-title">Graphical Encoding</h3>
+          </div>
+          <div class="panel-content">
+            <div class="control-row">
+              <label for="graph-select">Graph Type:</label>
+              <select id="graph-select">
+                <option value="tri" selected="">Triangular Grid Graph</option>
+                <option value="king">King's Graph</option>
+                <option value="spider">Triangulated Spider Graph</option>
+                <option value="random">Random Delaunay Triangulation</option>
+              </select>
+            </div>
+
+            <!-- Graph Parameters (shown/hidden based on selection) -->
+            <div id="tri-params" class="control-row graph-params" style="display: flex;">
+              <label class="param-label">
+                Size: <span id="tri-size-value">10</span>
+              </label>
+              <div id="tri-size-slider-container"><input type="range" min="5" max="15" step="1" class="param-slider">
+              </div>
+            </div>
+
+            <div id="spider-params" class="control-row graph-params" style="display: none">
+              <label class="param-label">
+                Layers: <span id="spider-layers-value">3</span>
+              </label>
+              <div id="spider-layers-slider-container"><input type="range" min="3" max="8" step="1"
+                  class="param-slider"></div>
+              <label class="param-label" style="margin-top: 8px">
+                Points per Layer: <span id="spider-points-value">8</span>
+              </label>
+              <div id="spider-points-slider-container"><input type="range" min="8" max="20" step="1"
+                  class="param-slider"></div>
+            </div>
+
+            <div id="king-params" class="control-row graph-params" style="display: none">
+              <label class="param-label">
+                Size: <span id="king-size-value">10</span>
+              </label>
+              <div id="king-size-slider-container"><input type="range" min="5" max="12" step="1" class="param-slider">
+              </div>
+            </div>
+
+            <div id="random-params" class="control-row graph-params" style="display: none">
+              <label class="param-label">
+                Number of Points: <span id="random-points-value">30</span>
+              </label>
+              <div id="random-points-slider-container"><input type="range" min="10" max="100" step="1"
+                  class="param-slider"></div>
+            </div>
+
+            <div class="control-row button-row">
+              <button id="btn-clear-graph" type="button">Clear Graph</button>
+            </div>
+            <div class="control-row button-row">
+              <button id="btn-export-graph" type="button">
+                Export Graph <span class="filetype">JSON</span>
+              </button>
+              <button id="btn-export-graph-svg" type="button">
+                Export Graph <span class="filetype">SVG</span>
+              </button>
+            </div>
+            <div class="control-row button-row">
+              <button id="btn-load-graph" type="button">
+                Import Graph <span class="filetype">JSON</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-panel right-panel">
+          <div class="panel-header">
+            <h3 class="canvas-title">Decoded Pattern</h3>
+          </div>
+          <div class="panel-content">
+            <div class="sliders-row">
+              <div class="control-row">
+                <label class="param-label">
+                  τ: <span id="tau-value">0.85</span>
+                  <span class="tooltip-icon"
+                    data-tooltip="Controls the size of the stars relative to its enclosing circle in the packing.">ⓘ</span>
+                </label>
+                <div id="tau-slider-container"><input type="range" min="0.7" max="0.9" step="0.01" class="param-slider">
+                </div>
+              </div>
+              <div class="control-row">
+                <label class="param-label">
+                  λ: <span id="lambda-value">0.42</span>
+                  <span class="tooltip-icon"
+                    data-tooltip="Controls the sharpness or depth of the star's points.">ⓘ</span>
+                </label>
+                <div id="lambda-slider-container"><input type="range" min="0.3" max="0.5" step="0.01"
+                    class="param-slider"></div>
+              </div>
+            </div>
+            <div class="control-row checkbox-row">
+              <div id="packing-checkbox-container">
+                <div class="param-checkbox"><input type="checkbox" id="e5yc2mebdoo"><label for="e5yc2mebdoo">Show
+                    Packing</label></div>
+              </div>
+              <div id="tiling-checkbox-container">
+                <div class="param-checkbox"><input type="checkbox" id="enn4r5wuode"><label for="enn4r5wuode">Show
+                    Tiling</label></div>
+              </div>
+            </div>
+            <div class="control-row button-row">
+              <button id="btn-export-pattern" type="button">
+                Export Pattern <span class="filetype">SVG</span>
+              </button>
+            </div>
+            <div class="control-row button-row">
+              <button id="btn-export-full" type="button">
+                Export Full — Packing + Tiling + Pattern <span class="filetype">SVG</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="sketch.js" async=""></script>
+
+    <div class="instructions">
+      <h3>⌨️ Keyboard Controls</h3>
+      <ul>
+        <li>
+          <strong>V</strong> — Switch to vertex mode (for adding/moving
+          points)
+        </li>
+        <li>
+          <strong>E</strong> — Switch to edge mode (for adding constrained
+          edges)
+        </li>
+        <li><strong>Space</strong> — Generate a default grid of points</li>
+        <li><strong>Enter</strong> — Reset and clear the canvas</li>
+        <li><strong>C</strong> — Export pattern as SVG file</li>
+        <li>
+          <strong>G</strong> — Export graph (points + constraints) as JSON
+        </li>
+        <li><strong>L</strong> — Load graph from JSON file</li>
+      </ul>
+      <h3>🖱️ Mouse Controls</h3>
+      <ul>
+        <li>
+          <strong>Click</strong> — Add points to the canvas (in vertex mode)
+        </li>
+        <li>
+          <strong>Click + Drag</strong> — Move existing points (in vertex
+          mode) or create a constrained edge (in edge mode)
+        </li>
+        <li><strong>Shift + Click</strong> — Remove a point</li>
+      </ul>
+    </div>
+
+    <script>
+      // Wire buttons once sketch.js is loaded
+      window.addEventListener("load", function () {
+        var exPat = document.getElementById("btn-export-pattern");
+        var exFull = document.getElementById("btn-export-full");
+        var exGra = document.getElementById("btn-export-graph");
+        var exGraSVG = document.getElementById("btn-export-graph-svg");
+        var ldGra = document.getElementById("btn-load-graph");
+        var clrGra = document.getElementById("btn-clear-graph");
+        var ddl = document.getElementById("graph-select");
+
+        if (exPat)
+          exPat.onclick = function () {
+            if (window.app && window.app.exportEdges)
+              window.app.exportEdges();
+          };
+        if (exFull)
+          exFull.onclick = function () {
+            if (window.app && window.app.exportFull)
+              window.app.exportFull();
+          };
+        if (exGra)
+          exGra.onclick = function () {
+            if (window.app && window.app.exportGraph)
+              window.app.exportGraph();
+          };
+        if (exGraSVG)
+          exGraSVG.onclick = function () {
+            if (window.app && window.app.exportGraphSVG)
+              window.app.exportGraphSVG();
+          };
+        if (ldGra)
+          ldGra.onclick = function () {
+            if (window.app && window.app.promptLoadGraph)
+              window.app.promptLoadGraph();
+          };
+        if (clrGra)
+          clrGra.onclick = function () {
+            if (window.app && window.app.clearGraph) window.app.clearGraph();
+          };
+        if (ddl)
+          ddl.onchange = function () {
+            if (!window.app || !window.app.setDefaultGraph) return;
+            var val = ddl.value;
+            window.app.showLoadingIndicator();
+            setTimeout(function () {
+              window.app.setDefaultGraph(val);
+              window.app.hideLoadingIndicator();
+            }, 10);
+          };
+      });
+    </script>
+  </div>
+
+
+  <main></main>
+</body>
+
+</html>

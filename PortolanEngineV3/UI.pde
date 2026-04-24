@@ -1,0 +1,396 @@
+// ControlP5-based UI for the Processing port. Mirrors the HTML panels of
+// the original constelation/ project:
+//   • Left  "Graphical Encoding": graph-type dropdown, per-type slider(s),
+//     Clear/Export JSON/Export SVG/Import JSON buttons.
+//   • Right "Decoded Pattern": τ slider, λ slider, Show Packing / Show Tiling
+//     toggles, Export Pattern SVG / Export Full SVG buttons.
+
+import java.io.File;
+import java.io.FileReader;
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+
+// ControlP5 widget names (must match across buildUI / controlEvent / sync).
+final String W_GRAPH_TYPE = "graphType";
+final String W_TRI_SIZE   = "triSize";
+final String W_KING_SIZE  = "kingSize";
+final String W_SPI_LAYERS = "spiderLayers";
+final String W_SPI_POINTS = "spiderPoints";
+final String W_RAND_PTS   = "randomPoints";
+final String W_CLEAR      = "clearGraph";
+final String W_EXP_JSON   = "exportGraphJson";
+final String W_EXP_GSVG   = "exportGraphSvg";
+final String W_IMP_JSON   = "importGraphJson";
+
+final String W_TAU        = "tau";
+final String W_LAMBDA     = "lambda";
+final String W_SHOW_PACK  = "showPacking";
+final String W_SHOW_TILE  = "showTiling";
+final String W_EXP_PAT    = "exportPatternSvg";
+final String W_EXP_FULL   = "exportFullSvg";
+
+void buildUI(ControlP5 cp, PortolanApp a) {
+  // Shared styling
+  int rowH = 22;
+  int btnH = 28;
+  int pad = 12;
+  int panelX = pad;
+  int panelW = LEFT_PANEL_W - pad * 2;
+  int rightX = LEFT_PANEL_W + CANVAS_W + pad;
+  int rightW = RIGHT_PANEL_W - pad * 2;
+
+  // ===== LEFT PANEL =====
+  int y = 60;
+  cp.addLabel("lbl_graphType").setText("Graph Type").setPosition(panelX, y).setColorValue(0xff333333);
+  y += 18;
+  java.util.List<String> graphItems = java.util.Arrays.asList(
+    "Triangular Grid Graph",
+    "King's Graph",
+    "Triangulated Spider Graph",
+    "Random Delaunay Triangulation"
+  );
+  cp.addScrollableList(W_GRAPH_TYPE)
+    .setPosition(panelX, y)
+    .setSize(panelW, 110)
+    .setBarHeight(22)
+    .setItemHeight(20)
+    .addItems(graphItems)
+    .setType(ControlP5.LIST)
+    .setOpen(false)
+    .close()
+    .setValue(a.graphKind);
+  y += 30;
+
+  // Per-type parameter sliders (all created; visibility toggled by syncUIFromApp)
+  cp.addSlider(W_TRI_SIZE)
+    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setRange(5, 15).setNumberOfTickMarks(11)
+    .setValue(a.triSz).setCaptionLabel("Size (tri)");
+  cp.addSlider(W_KING_SIZE)
+    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setRange(5, 12).setNumberOfTickMarks(8)
+    .setValue(a.kSz).setCaptionLabel("Size (king)");
+  cp.addSlider(W_SPI_LAYERS)
+    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setRange(3, 8).setNumberOfTickMarks(6)
+    .setValue(a.sLay).setCaptionLabel("Spider Layers");
+  cp.addSlider(W_SPI_POINTS)
+    .setPosition(panelX, y + rowH + 8).setSize(panelW, rowH)
+    .setRange(8, 20).setNumberOfTickMarks(13)
+    .setValue(a.sPt).setCaptionLabel("Points per Layer");
+  cp.addSlider(W_RAND_PTS)
+    .setPosition(panelX, y).setSize(panelW, rowH)
+    .setRange(10, 100)
+    .setValue(a.rN).setCaptionLabel("Number of Points");
+
+  // Graph buttons
+  y = 170;
+  cp.addButton(W_CLEAR).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Clear Graph");
+  y += btnH + 8;
+  cp.addButton(W_EXP_JSON).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Export Graph  (JSON)");
+  y += btnH + 8;
+  cp.addButton(W_EXP_GSVG).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Export Graph  (SVG)");
+  y += btnH + 8;
+  cp.addButton(W_IMP_JSON).setPosition(panelX, y).setSize(panelW, btnH).setCaptionLabel("Import Graph  (JSON)");
+
+  // ===== RIGHT PANEL =====
+  y = 60;
+  cp.addSlider(W_TAU)
+    .setPosition(rightX, y).setSize(rightW, rowH)
+    .setRange(0.7f, 0.9f).setValue(a.tau).setCaptionLabel("tau (star size)");
+  y += rowH + 18;
+  cp.addSlider(W_LAMBDA)
+    .setPosition(rightX, y).setSize(rightW, rowH)
+    .setRange(0.3f, 0.5f).setValue(a.lambda).setCaptionLabel("lambda (sharpness)");
+  y += rowH + 24;
+  cp.addToggle(W_SHOW_PACK)
+    .setPosition(rightX, y).setSize(18, 18)
+    .setValue(a.shPack).setCaptionLabel("Show Packing").setMode(ControlP5.DEFAULT);
+  y += 34;
+  cp.addToggle(W_SHOW_TILE)
+    .setPosition(rightX, y).setSize(18, 18)
+    .setValue(a.shTile).setCaptionLabel("Show Tiling").setMode(ControlP5.DEFAULT);
+  y += 50;
+  cp.addButton(W_EXP_PAT).setPosition(rightX, y).setSize(rightW, btnH).setCaptionLabel("Export Pattern  (SVG)");
+  y += btnH + 8;
+  cp.addButton(W_EXP_FULL).setPosition(rightX, y).setSize(rightW, btnH).setCaptionLabel("Export Full  (SVG)");
+}
+
+// Adjust widget visibility based on the current graph kind.
+void syncUIFromApp(ControlP5 cp, PortolanApp a) {
+  setVisible(cp, W_TRI_SIZE,   a.graphKind == 0);
+  setVisible(cp, W_KING_SIZE,  a.graphKind == 1);
+  setVisible(cp, W_SPI_LAYERS, a.graphKind == 2);
+  setVisible(cp, W_SPI_POINTS, a.graphKind == 2);
+  setVisible(cp, W_RAND_PTS,   a.graphKind == 3);
+}
+
+void setVisible(ControlP5 cp, String name, boolean visible) {
+  Controller c = cp.getController(name);
+  if (c == null) return;
+  if (visible) c.show(); else c.hide();
+}
+
+// Pending-graph-export flags so SVG/JSON file dialogs run asynchronously
+// without blocking ControlP5 event dispatch.
+String pendingSvgExport = null; // "pattern", "full", or "graph"
+boolean pendingJsonExport = false;
+
+// Single dispatcher for all ControlP5 events.
+void controlEvent(ControlEvent ce) {
+  if (app == null) return;
+  String n = ce.getName();
+  if (n == null) return;
+
+  if (n.equals(W_GRAPH_TYPE)) {
+    int idx = (int) ce.getValue();
+    app.graphKind = constrain(idx, 0, 3);
+    syncUIFromApp(cp5, app);
+    app.setGraph(app.graphKind);
+  } else if (n.equals(W_TRI_SIZE)) {
+    app.triSz = (int) ce.getValue();
+    if (app.graphKind == 0) app.setGraph(0);
+  } else if (n.equals(W_KING_SIZE)) {
+    app.kSz = (int) ce.getValue();
+    if (app.graphKind == 1) app.setGraph(1);
+  } else if (n.equals(W_SPI_LAYERS)) {
+    app.sLay = (int) ce.getValue();
+    if (app.graphKind == 2) app.setGraph(2);
+  } else if (n.equals(W_SPI_POINTS)) {
+    app.sPt = (int) ce.getValue();
+    if (app.graphKind == 2) app.setGraph(2);
+  } else if (n.equals(W_RAND_PTS)) {
+    app.rN = (int) ce.getValue();
+    if (app.graphKind == 3) app.setGraph(3);
+  } else if (n.equals(W_TAU)) {
+    app.tau = ce.getValue();
+  } else if (n.equals(W_LAMBDA)) {
+    app.lambda = ce.getValue();
+  } else if (n.equals(W_SHOW_PACK)) {
+    app.shPack = ce.getValue() > 0.5f;
+  } else if (n.equals(W_SHOW_TILE)) {
+    app.shTile = ce.getValue() > 0.5f;
+  } else if (n.equals(W_CLEAR)) {
+    app.reset();
+  } else if (n.equals(W_EXP_JSON)) {
+    pendingJsonExport = true;
+  } else if (n.equals(W_EXP_GSVG)) {
+    pendingSvgExport = "graph";
+  } else if (n.equals(W_IMP_JSON)) {
+    selectInput("Load graph JSON", "loadGraphFileSelected");
+  } else if (n.equals(W_EXP_PAT)) {
+    pendingSvgExport = "pattern";
+  } else if (n.equals(W_EXP_FULL)) {
+    pendingSvgExport = "full";
+  } else {
+    return;
+  }
+  redraw();
+
+  // File dialogs must run after we've returned from the ControlP5 event.
+  if (pendingJsonExport) {
+    pendingJsonExport = false;
+    selectOutput("Save graph as JSON", "saveGraphJsonSelected");
+  }
+  if (pendingSvgExport != null) {
+    String kind = pendingSvgExport;
+    pendingSvgExport = null;
+    selectOutput("Save " + kind + " as SVG", "saveSvgSelected_" + kind);
+  }
+}
+
+// ===== File-dialog callbacks (must be top-level) =====
+
+void loadGraphFileSelected(File f) {
+  if (f == null || app == null) return;
+  try {
+    StringBuilder sb = new StringBuilder();
+    BufferedReader br = new BufferedReader(new FileReader(f));
+    String line;
+    while ((line = br.readLine()) != null) sb.append(line).append('\n');
+    br.close();
+    loadGraphFromJson(app, sb.toString());
+    redraw();
+  } catch (Exception e) {
+    println("[UI] loadGraph failed: " + e.getMessage());
+    e.printStackTrace();
+  }
+}
+
+void saveGraphJsonSelected(File f) {
+  if (f == null || app == null) return;
+  String path = f.getAbsolutePath();
+  if (!path.toLowerCase().endsWith(".json")) path += ".json";
+  saveStrings(path, new String[] { graphToJson(app) });
+  println("[UI] graph JSON saved: " + path);
+}
+
+void saveSvgSelected_pattern(File f) { saveSvgFile(f, "pattern"); }
+void saveSvgSelected_full(File f)    { saveSvgFile(f, "full"); }
+void saveSvgSelected_graph(File f)   { saveSvgFile(f, "graph"); }
+
+void saveSvgFile(File f, String kind) {
+  if (f == null || app == null) return;
+  String path = f.getAbsolutePath();
+  if (!path.toLowerCase().endsWith(".svg")) path += ".svg";
+  String svg;
+  if (kind.equals("graph"))        svg = graphToSvg(app);
+  else if (kind.equals("pattern")) svg = patternToSvg(app, false);
+  else                             svg = patternToSvg(app, true);
+  saveStrings(path, new String[] { svg });
+  println("[UI] " + kind + " SVG saved: " + path);
+}
+
+// ===== JSON helpers (minimal, tailored to our payload shape) =====
+
+String graphToJson(PortolanApp a) {
+  StringBuilder sb = new StringBuilder();
+  sb.append("{\n  \"points\": [\n");
+  for (int i = 0; i < a.mesh.vert.size(); i++) {
+    GPoint p = a.mesh.vert.get(i);
+    sb.append("    { \"x\": ").append(nfJson(p.x)).append(", \"y\": ").append(nfJson(p.y)).append(" }");
+    if (i < a.mesh.vert.size() - 1) sb.append(',');
+    sb.append('\n');
+  }
+  sb.append("  ],\n  \"constraints\": [\n");
+  for (int i = 0; i < a.mesh.conEdge.size(); i++) {
+    int[] e = a.mesh.conEdge.get(i);
+    sb.append("    { \"a\": ").append(e[0]).append(", \"b\": ").append(e[1]).append(" }");
+    if (i < a.mesh.conEdge.size() - 1) sb.append(',');
+    sb.append('\n');
+  }
+  sb.append("  ]\n}\n");
+  return sb.toString();
+}
+
+String nfJson(float v) {
+  // Avoid locale-specific comma decimals.
+  return String.format(java.util.Locale.US, "%.3f", v);
+}
+
+void loadGraphFromJson(PortolanApp a, String json) {
+  // Tiny bespoke parser that only understands the shape graphToJson emits.
+  Mesh m = new Mesh();
+  java.util.regex.Matcher pm = java.util.regex.Pattern
+    .compile("\"x\"\\s*:\\s*([-0-9\\.eE]+)\\s*,\\s*\"y\"\\s*:\\s*([-0-9\\.eE]+)")
+    .matcher(json);
+  while (pm.find()) {
+    m.addPoint(new GPoint(Float.parseFloat(pm.group(1)), Float.parseFloat(pm.group(2))));
+  }
+  java.util.regex.Matcher cm = java.util.regex.Pattern
+    .compile("\"a\"\\s*:\\s*(\\d+)\\s*,\\s*\"b\"\\s*:\\s*(\\d+)")
+    .matcher(json);
+  while (cm.find()) {
+    int aa = Integer.parseInt(cm.group(1));
+    int bb = Integer.parseInt(cm.group(2));
+    if (aa < m.vert.size() && bb < m.vert.size()) m.addConstraint(aa, bb);
+  }
+  a.mesh = m;
+  a.sel = -1;
+  a.markMeshDirty();
+}
+
+// ===== SVG helpers =====
+
+String graphToSvg(PortolanApp a) {
+  Mesh m = a.mesh;
+  if (m.numPoints() == 0) return "<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+  float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
+  float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+  for (GPoint p : m.vert) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  float pad = 30;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+  float w = maxX - minX, h = maxY - minY;
+  StringBuilder s = new StringBuilder();
+  s.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
+  s.append(String.format(java.util.Locale.US,
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.0f\" height=\"%.0f\" viewBox=\"%.0f %.0f %.0f %.0f\">\n",
+    w, h, minX, minY, w, h));
+  s.append(String.format(java.util.Locale.US,
+    "  <rect x=\"%.0f\" y=\"%.0f\" width=\"%.0f\" height=\"%.0f\" fill=\"#e7f5f7\"/>\n",
+    minX, minY, w, h));
+  s.append("  <g stroke=\"#484848\" stroke-width=\"0.5\" fill=\"none\">\n");
+  for (int[] t : m.tri) {
+    GPoint a0 = m.vert.get(t[0]), b0 = m.vert.get(t[1]), c0 = m.vert.get(t[2]);
+    s.append(String.format(java.util.Locale.US,
+      "    <polygon points=\"%.3f,%.3f %.3f,%.3f %.3f,%.3f\"/>\n",
+      a0.x, a0.y, b0.x, b0.y, c0.x, c0.y));
+  }
+  s.append("  </g>\n  <g stroke=\"#dd7c74\" stroke-width=\"1.5\" fill=\"none\">\n");
+  for (int[] e : m.conEdge) {
+    GPoint p = m.vert.get(e[0]), q = m.vert.get(e[1]);
+    s.append(String.format(java.util.Locale.US,
+      "    <line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
+      p.x, p.y, q.x, q.y));
+  }
+  s.append("  </g>\n  <g>\n");
+  for (int i = 0; i < m.numPoints(); i++) {
+    GPoint p = m.vert.get(i);
+    int col = a.vtxCol(i, m.numPoints());
+    String hex = String.format("#%02x%02x%02x", (col >> 16) & 0xff, (col >> 8) & 0xff, col & 0xff);
+    boolean b = i < m.vertProps.size() && m.vertProps.get(i).boundary;
+    if (b) {
+      s.append(String.format(java.util.Locale.US,
+        "    <circle cx=\"%.3f\" cy=\"%.3f\" r=\"4\" fill=\"%s\" stroke=\"#ffffff\" stroke-width=\"1.5\"/>\n",
+        p.x, p.y, hex));
+    } else {
+      s.append(String.format(java.util.Locale.US,
+        "    <circle cx=\"%.3f\" cy=\"%.3f\" r=\"4\" fill=\"%s\"/>\n",
+        p.x, p.y, hex));
+    }
+  }
+  s.append("  </g>\n</svg>\n");
+  return s.toString();
+}
+
+// Pattern SVG: emit the five-point stars (and optionally packing + tiling)
+// in the same canvas-local coordinates that drawAll() uses.
+String patternToSvg(PortolanApp a, boolean includePackingAndTiling) {
+  StringBuilder s = new StringBuilder();
+  s.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
+  s.append(String.format(java.util.Locale.US,
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\">\n",
+    CANVAS_W, CANVAS_H, CANVAS_W, CANVAS_H));
+  s.append(String.format(java.util.Locale.US,
+    "  <rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" fill=\"#ffffff\"/>\n",
+    CANVAS_W, CANVAS_H));
+
+  if (includePackingAndTiling) {
+    // Packing circles
+    s.append("  <g id=\"packing\" fill=\"rgba(240,173,78,0.16)\" stroke=\"none\">\n");
+    for (PattC c : a.pCirc.values()) {
+      s.append(String.format(java.util.Locale.US,
+        "    <circle cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"/>\n", c.x, c.y, c.d / 2.0f));
+    }
+    s.append("  </g>\n");
+    // Tiling edges
+    s.append("  <g id=\"tiling\" stroke=\"#888888\" stroke-width=\"0.75\" fill=\"none\">\n");
+    final StringBuilder tileBuf = s;
+    for (CycP q : a.pCyc.values()) {
+      q.cE(a.lambda, (p0, p1) -> {
+        tileBuf.append(String.format(java.util.Locale.US,
+          "    <line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
+          p0.x, p0.y, p1.x, p1.y));
+      });
+    }
+    s.append("  </g>\n");
+  }
+
+  // Stars — the decoded pattern proper
+  s.append("  <g id=\"pattern\" stroke=\"#dd5c50\" stroke-width=\"1\" fill=\"none\">\n");
+  final StringBuilder patBuf = s;
+  for (Pent t : a.p5) {
+    t.cE(a.lambda, (p0, p1) -> {
+      patBuf.append(String.format(java.util.Locale.US,
+        "    <line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
+        p0.x, p0.y, p1.x, p1.y));
+    });
+  }
+  s.append("  </g>\n</svg>\n");
+  return s.toString();
+}
