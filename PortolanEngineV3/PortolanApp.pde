@@ -74,11 +74,46 @@ class PortolanApp {
       drawRosone2Cells();
       return;
     }
-    for (CycP q : pCyc.values()) { if (shTile) q.dT(pa); }
-    for (CycP q : pCyc.values()) { q.cE(lambda, (a, b) -> { }); }
-    p5 = cB3(mesh, pCirc, pCyc, tau);
-    for (CycP q : pCyc.values()) { q.dM(pa, lambda); }
-    for (Pent t : p5) { t.cE(lambda, (a, b) -> { pa.pushStyle(); pa.stroke(220, 90, 80); pa.line(a.x, a.y, b.x, b.y); pa.popStyle(); }); }
+    // Rosone 1 — for each cyclic polygon, draw the {N/skip} star polygon
+    // through its vertices. The chord intersections automatically create
+    // the rosette's pentagonal cells and central star (no separate motif
+    // construction is needed). shTile still draws the polygon outlines
+    // when enabled.
+    drawRosone1Cells();
+  }
+
+  // Rosone 1 — chord-based star polygon per cyclic polygon. For each q in
+  // pCyc, draw the {q.n / chooseStarSkip(q.n)} star polygon connecting its
+  // vertices. The intersections between chords carve out the rosette's
+  // pentagonal cells and central star automatically — no separate cell
+  // construction needed (which is what the reference image shows).
+  void drawRosone1Cells() {
+    pa.pushStyle();
+    pa.noFill();
+    pa.stroke(0, 155, 170);
+    pa.strokeWeight(0.75f);
+    if (shTile) {
+      for (CycP q : pCyc.values()) {
+        if (!q.on) continue;
+        pa.beginShape();
+        for (GPoint v : q.v) pa.vertex(v.x, v.y);
+        pa.endShape(PApplet.CLOSE);
+      }
+    }
+    pa.stroke(220, 90, 80);
+    pa.strokeWeight(1.0f);
+    for (CycP q : pCyc.values()) {
+      if (!q.on || q.n < 4) continue;
+      drawRosone1OnPolygon(q);
+    }
+    pa.popStyle();
+  }
+
+  void drawRosone1OnPolygon(CycP q) {
+    int N = q.n;
+    GPoint[] V = new GPoint[N];
+    for (int i = 0; i < N; ++i) V[i] = q.v.get(i);
+    drawStarPolygon(V, chooseStarSkip(N));
   }
 
   // Rosone 2 — for each cyclic polygon produced by the packing, render a
