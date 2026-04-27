@@ -132,3 +132,23 @@ void mouseReleased() {
 }
 
 void keyPressed() { if (app != null) { app.key(key); redraw(); } }
+
+// Mouse wheel over the right half of the canvas zooms the pattern in/out
+// (1.10x per wheel notch), keeping app.rightZoom in sync with the Zoom
+// slider so both controls always agree. Wheel events outside the right
+// canvas (the left graph editor or the right control column) are ignored.
+void mouseWheel(MouseEvent event) {
+  if (app == null) return;
+  int rightX0 = LEFT_PANEL_W + CANVAS_W / 2;
+  int rightX1 = LEFT_PANEL_W + CANVAS_W;
+  if (mouseX < rightX0 || mouseX >= rightX1) return;
+  if (mouseY < 0 || mouseY >= CANVAS_H) return;
+  float delta = event.getCount();
+  float factor = (delta < 0) ? 1.10f : 1.0f / 1.10f;
+  float newZoom = constrain(app.rightZoom * factor, 0.5f, 4.0f);
+  if (newZoom == app.rightZoom) return;
+  app.rightZoom = newZoom;
+  DragSlider zs = sliders.get(W_ZOOM);
+  if (zs != null) zs.setValue(newZoom);
+  redraw();
+}

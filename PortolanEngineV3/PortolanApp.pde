@@ -20,6 +20,13 @@ class PortolanApp {
   // overlays an outer enclosing circle + convex-hull polygon + lens petals
   // along each hull edge. See drawRosone2Decoration() for the geometry.
   int rosoneKind = 0;
+
+  // View-only zoom for the right pattern canvas. 1.0 = no zoom. Applied as
+  // a matrix scale around the right-canvas pattern center in drawAll();
+  // packing/cyclic-polygon coordinates and the left graph editor are
+  // completely unaffected, so the pattern's data and exports stay correct
+  // regardless of zoom level.
+  float rightZoom = 1.0f;
   java.util.HashMap<Integer, PattC> pCirc = new java.util.HashMap<Integer, PattC>();
   java.util.HashMap<Integer, CycP> pCyc = new java.util.HashMap<Integer, CycP>();
   java.util.ArrayList<Pent> p5 = new java.util.ArrayList<Pent>();
@@ -63,23 +70,43 @@ class PortolanApp {
     p5.clear();
     pa.background(255);
     drawL();
-    pack();
-    if (rosoneKind == 1) {
-      // Rosone 2 reuses the same mesh → circle packing → cyclic polygons
-      // pipeline as Rosone 1, but renders it as clean polygon tiles inside
-      // an outer enclosing circle + convex-hull polygon + lens petals,
-      // instead of the connect-midpoints multi-star motif. The graph the
-      // user designs on the left still drives the pattern on the right —
-      // it's just a different visual treatment of the same data.
-      drawRosone2Cells();
-      return;
+
+    // Right canvas: clip to the right half so a zoomed-in pattern can't
+    // bleed into the left graph editor, then scale the rendered geometry
+    // around the pattern's natural center (drawW * 0.75, drawH * 0.5).
+    // Only the *visual output* is transformed — pCirc / pCyc positions
+    // are still computed in unzoomed canvas coordinates, so the data the
+    // SVG export reads, the cyclic polygons the user clicks, and the
+    // mesh itself are all unaffected by the zoom level. try/finally
+    // guards the matrix/clip stack against exceptions inside drawing.
+    pa.pushStyle();
+    pa.clip(drawW * 0.5f, 0, drawW * 0.5f, drawH);
+    pa.pushMatrix();
+    float zcx = drawW * 0.75f, zcy = drawH * 0.5f;
+    pa.translate(zcx, zcy);
+    pa.scale(rightZoom);
+    pa.translate(-zcx, -zcy);
+
+    try {
+      pack();
+      if (rosoneKind == 1) {
+        // Rosone 2 — clean per-cell rosette with outer circle, lens
+        // petals, mid/inner pentagonal cells, and a central star.
+        drawRosone2Cells();
+      } else if (rosoneKind == 2) {
+        // Rosone 3 — gothic per-cell rosette + gap-filler polygon
+        // outlines as the irregular surrounding network.
+        drawRosone3Cells();
+      } else {
+        // Rosone 1 — chord-based {N/skip} star polygon per cell. shTile
+        // still draws the polygon outlines when enabled.
+        drawRosone1Cells();
+      }
+    } finally {
+      pa.popMatrix();
+      pa.noClip();
+      pa.popStyle();
     }
-    // Rosone 1 — for each cyclic polygon, draw the {N/skip} star polygon
-    // through its vertices. The chord intersections automatically create
-    // the rosette's pentagonal cells and central star (no separate motif
-    // construction is needed). shTile still draws the polygon outlines
-    // when enabled.
-    drawRosone1Cells();
   }
 
   // Rosone 1 — chord-based star polygon per cyclic polygon. For each q in
@@ -200,6 +227,146 @@ class PortolanApp {
     }
 
     drawStarPolygon(r, U, chooseStarSkip(N));
+  }
+
+  // ===================================================================
+  // Rosone 3 — gothic per-cell rosette + irregular polygonal gap filler
+  // ===================================================================
+  //
+  // For each cyclic polygon q in pCyc:
+  //
+  //   • Inscribe a gothic rosette inside q's *apothem* (q's inscribed
+  //     circle), so the rosette never crosses a polygon edge. The space
+  //     between the rosette's outer circle and the polygon edges is the
+  //     "gap" we leave for drawRosone3Gaps() to fill.
+  //   • Build the rosette from polar coordinates: a center (q.x, q.y), an
+  //     angular subdivision n = constrain(q.n * 2, 12, 16), and four
+  //     concentric construction radii r1..r4 (a fifth, r3ext, pushes
+  //     petal-layer outer points outward to create the pointed gothic
+  //     petals). Aligning the rosette's first ray with q.v[0] makes the
+  //     rosette's symmetry follow the polygon's own.
+  //   • Render in three visually-distinct layers: thin gray construction
+  //     guides (concentric circles + radial spokes), thick red main lines
+  //     (inner star + cross-sector diagonals + petals + outer ring), and
+  //     a separate gap-filler pass that draws every polygon outline so
+  //     the irregular network around the rosettes is clearly visible.
+  //
+  // Same per-polygon, graph-driven model as Rosone 1 / 2 — editing the
+  // graph on the left immediately changes every Rosone 3 cell.
+  void drawRosone3Cells() {
+    pa.pushStyle();
+    pa.noFill();
+    Renderer r = new PARenderer(pa);
+
+    // Gap pass first so the rosettes draw on top of the polygon outlines.
+    drawRosone3Gaps(r);
+
+    for (CycP q : pCyc.values()) {
+      if (!q.on || q.n < 3) continue;
+      drawRosone3OnPolygon(r, q);
+    }
+
+    pa.popStyle();
+  }
+
+  void drawRosone3OnPolygon(Renderer r, CycP q) {
+    int n = constrain(q.n * 2, 12, 16);
+    float R = q.sc / 2.0f;
+    // Apothem-based outer extent: cos(PI/q.n) * R is the polygon's apothem
+    // (distance from center to edge midpoint). Multiplying by 0.95 keeps
+    // the rosette strictly inside that, so an annular gap always remains.
+    float rosR = R * cos(PI / max(3, q.n)) * 0.95f;
+    float r1 = rosR * 0.18f;
+    float r2 = rosR * 0.42f;
+    float r3 = rosR * 0.65f;
+    float r3ext = r3 * 1.08f;
+    float r4 = rosR * 0.95f;
+
+    float a0 = atan2(q.v.get(0).y - q.y, q.v.get(0).x - q.x);
+    float angleStep = TWO_PI / n;
+
+    GPoint[] ring1  = new GPoint[n];
+    GPoint[] ring2  = new GPoint[n];
+    GPoint[] ring3  = new GPoint[n];
+    GPoint[] ring3e = new GPoint[n];
+    GPoint[] ring4  = new GPoint[n];
+    for (int i = 0; i < n; ++i) {
+      float a = a0 + i * angleStep;
+      float cc = cos(a), ss = sin(a);
+      ring1[i]  = new GPoint(q.x + cc * r1,    q.y + ss * r1);
+      ring2[i]  = new GPoint(q.x + cc * r2,    q.y + ss * r2);
+      ring3[i]  = new GPoint(q.x + cc * r3,    q.y + ss * r3);
+      ring3e[i] = new GPoint(q.x + cc * r3ext, q.y + ss * r3ext);
+      ring4[i]  = new GPoint(q.x + cc * r4,    q.y + ss * r4);
+    }
+
+    // ---- Construction guides (thin, light gray) ----
+    pa.stroke(190, 190, 190);
+    pa.strokeWeight(0.5f);
+    r.circle(q.x, q.y, r1 * 2);
+    r.circle(q.x, q.y, r2 * 2);
+    r.circle(q.x, q.y, r3 * 2);
+    r.circle(q.x, q.y, r4 * 2);
+    for (int i = 0; i < n; ++i) {
+      r.line(q.x, q.y, ring4[i].x, ring4[i].y);
+    }
+
+    // ---- Main rosette (thick, red) ----
+    pa.stroke(220, 90, 80);
+    pa.strokeWeight(1.5f);
+
+    // Inner star — center → ring 1 spokes.
+    for (int i = 0; i < n; ++i) {
+      r.line(q.x, q.y, ring1[i].x, ring1[i].y);
+    }
+    // Ring 1 chord star (i → i+2 mod n) — the sharp inner rosette.
+    for (int i = 0; i < n; ++i) {
+      GPoint a = ring1[i], b = ring1[(i + 2) % n];
+      r.line(a.x, a.y, b.x, b.y);
+    }
+
+    // Cross-sector diagonals between ring 1 and ring 2 — each ring 1 point
+    // connects to its two angular neighbours one ring out, producing the
+    // diamond facet pattern visible around the central star in gothic
+    // rosettes.
+    for (int i = 0; i < n; ++i) {
+      r.line(ring1[i].x, ring1[i].y, ring2[(i + 1) % n].x,         ring2[(i + 1) % n].y);
+      r.line(ring1[i].x, ring1[i].y, ring2[(i - 1 + n) % n].x,     ring2[(i - 1 + n) % n].y);
+    }
+    renderPolygonClosed(r, ring2);
+
+    // Petal kites between ring 2 and the extended r3ext ring. Each kite's
+    // four corners are (ring2[i], r3ext[i], r3ext[i+1], ring2[i+1]). We
+    // skip the inner edge (ring2[i] → ring2[i+1]) here because it is
+    // already drawn by renderPolygonClosed(ring2) above.
+    for (int i = 0; i < n; ++i) {
+      GPoint p2a = ring2[i],  p2b = ring2[(i + 1) % n];
+      GPoint p3a = ring3e[i], p3b = ring3e[(i + 1) % n];
+      r.line(p2a.x, p2a.y, p3a.x, p3a.y);
+      r.line(p3a.x, p3a.y, p3b.x, p3b.y);
+      r.line(p3b.x, p3b.y, p2b.x, p2b.y);
+    }
+
+    // Outer ring closure + radial connectors closing each petal cell.
+    renderPolygonClosed(r, ring4);
+    for (int i = 0; i < n; ++i) {
+      r.line(ring3[i].x, ring3[i].y, ring4[i].x, ring4[i].y);
+    }
+  }
+
+  // Gap filler — every cyclic polygon's outline drawn as the irregular
+  // network around the per-cell rosettes. Because drawRosone3OnPolygon
+  // confines its rosette inside the polygon's apothem, the polygon edges
+  // are always visible as a clean boundary between adjacent cells, and
+  // chaining them produces the "irregular polygonal mesh" look the
+  // reference image has surrounding its central rosette.
+  void drawRosone3Gaps(Renderer r) {
+    pa.stroke(80, 80, 80);
+    pa.strokeWeight(1.0f);
+    for (CycP q : pCyc.values()) {
+      if (!q.on) continue;
+      renderPolygonClosed(r, cycPVerts(q));
+    }
   }
 
   // Scale each vertex of q.v toward q's center by `factor`. Because every

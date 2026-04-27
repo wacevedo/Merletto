@@ -31,6 +31,7 @@ final String W_IMP_JSON    = "importGraphJson";
 
 final String W_TAU        = "tau";
 final String W_LAMBDA     = "lambda";
+final String W_ZOOM       = "rightZoom";
 final String W_SHOW_PACK  = "showPacking";
 final String W_SHOW_TILE  = "showTiling";
 final String W_EXP_PAT    = "exportPatternSvg";
@@ -52,11 +53,16 @@ final String[] GRAPH_TYPE_LABELS = {
 };
 
 // Labels for the "Rosone Type" dropdown. Index → PortolanApp.rosoneKind.
-// 0 = "Rosone 1" (existing motif), 1 = "Rosone 2" (motif + outer enclosing
-// circle, convex-hull polygon, and lens petals along each hull edge).
+// 0 = "Rosone 1" — chord-based {N/skip} star polygon per cell.
+// 1 = "Rosone 2" — per-cell rosette with outer circle, lens petals, nested
+//                  rings (full geometry — no gap to the polygon edges).
+// 2 = "Rosone 3" — gothic per-cell rosette inscribed in a smaller circle,
+//                  paired with a separate gap-filler that draws the cyclic
+//                  polygon outlines as the irregular network around them.
 final String[] ROSONE_TYPE_LABELS = {
   "Rosone 1",
-  "Rosone 2"
+  "Rosone 2",
+  "Rosone 3"
 };
 
 // ===== Layout constants (referenced by PortolanEngineV3.pde's card-drawing) =====
@@ -66,7 +72,7 @@ final int UI_CARD_W  = RIGHT_PANEL_W - 24;       // 316
 final int UI_ENC_Y1  = 12;                       // top of "Graphical Encoding" card
 final int UI_ENC_H   = 408;                      // height of encoding card (extra room for the Rosone Type dropdown)
 final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap) → 352
-final int UI_DEC_H   = 288;                      // height of decoded-pattern card
+final int UI_DEC_H   = 332;                      // height of decoded-pattern card (extra row for the Zoom slider at the top)
 
 // Inner padding inside each card (text/widgets kept off the rounded border).
 final int UI_CARD_PAD_X = 14;
@@ -188,6 +194,14 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // ===================================================================
   y = UI_ENC_Y2 + 12 + UI_CARD_PAD_Y_TOP;
 
+  // Zoom — view-only scale around the right pattern center. Sits above
+  // tau/lambda because it's a *viewing* control, not a pattern parameter:
+  // sliding it doesn't change any geometry, only the magnification at
+  // which the pattern is rendered. Range 0.5x..4x covers everything from
+  // a wide overview to inspecting individual rosone cells up close.
+  addSlider(W_ZOOM, colX, y, colW, 0.5f, 4.0f, a.rightZoom, 2, false, "Zoom");
+  y += rowH + 22;
+
   // Float sliders — 2 decimal places, no integer snap.
   addSlider(W_TAU,    colX, y, colW, 0.7f, 0.9f, a.tau,    2, false, "tau (star size)");
   y += rowH + 22;
@@ -275,6 +289,7 @@ void onSliderChange(DragSlider s) {
   else if (n.equals(W_RAND_PTS))   { app.rN    = (int) v; if (app.graphKind == 3) app.setGraph(3); }
   else if (n.equals(W_TAU))        { app.tau    = v; }
   else if (n.equals(W_LAMBDA))     { app.lambda = v; }
+  else if (n.equals(W_ZOOM))       { app.rightZoom = v; }
 }
 
 // True when ANY of our dropdowns is currently expanded. We suppress slider
