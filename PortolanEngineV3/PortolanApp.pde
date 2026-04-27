@@ -15,6 +15,11 @@ class PortolanApp {
   int sLay = SPIDER_LAYERS_DEF, sPt = SPIDER_POINTS_DEF, rN = RAND_POINTS_DEF;
   boolean shPack = false, shTile = false;
   int graphKind; // 0 tri 1 king 2 spider 3 random
+  // Pattern style for the right-panel render. 0 = "Rosone 1" (the existing
+  // multi-circle motif). 1 = "Rosone 2", which keeps the same engine and
+  // overlays an outer enclosing circle + convex-hull polygon + lens petals
+  // along each hull edge. See drawRosone2Decoration() for the geometry.
+  int rosoneKind = 0;
   java.util.HashMap<Integer, PattC> pCirc = new java.util.HashMap<Integer, PattC>();
   java.util.HashMap<Integer, CycP> pCyc = new java.util.HashMap<Integer, CycP>();
   java.util.ArrayList<Pent> p5 = new java.util.ArrayList<Pent>();
@@ -59,11 +64,195 @@ class PortolanApp {
     pa.background(255);
     drawL();
     pack();
+    if (rosoneKind == 1) {
+      // Rosone 2 reuses the same mesh → circle packing → cyclic polygons
+      // pipeline as Rosone 1, but renders it as clean polygon tiles inside
+      // an outer enclosing circle + convex-hull polygon + lens petals,
+      // instead of the connect-midpoints multi-star motif. The graph the
+      // user designs on the left still drives the pattern on the right —
+      // it's just a different visual treatment of the same data.
+      drawRosone2Cells();
+      return;
+    }
     for (CycP q : pCyc.values()) { if (shTile) q.dT(pa); }
     for (CycP q : pCyc.values()) { q.cE(lambda, (a, b) -> { }); }
     p5 = cB3(mesh, pCirc, pCyc, tau);
     for (CycP q : pCyc.values()) { q.dM(pa, lambda); }
     for (Pent t : p5) { t.cE(lambda, (a, b) -> { pa.pushStyle(); pa.stroke(220, 90, 80); pa.line(a.x, a.y, b.x, b.y); pa.popStyle(); }); }
+  }
+
+  // Rosone 2 — for each cyclic polygon produced by the packing, render a
+  // self-contained Rosone 2 motif inscribed in it. The polygon (a CycP) is
+  // treated as the OUTER inscribed n-gon of the rosette, and we build the
+  // rest of the rosette parametrically from its vertices and circumradius:
+  //
+  //   1. Outer circle (passes through the polygon's vertices, radius q.sc/2)
+  //   2. Polygon outline (q itself)
+  //   3. Lens petal arc on each polygon edge (chord-bulge arc; the outer
+  //      circle's arc is the petal's outer edge)
+  //   4. Mid-ring W: q.v scaled toward q.center by MID_R_F
+  //   5. n outer pentagonal cells: V[i], V[i+1], W[i+1], apex, W[i]
+  //   6. Mid-ring polygon outline
+  //   7. Inner-ring U: q.v scaled toward q.center by INNER_R_F
+  //   8. n inner pentagonal cells: W[i], W[i+1], U[i+1], apex, U[i]
+  //   9. Central {n/skip} star polygon connecting U vertices across center
+  //
+  // This is fully driven by the graph the user designs on the left: each
+  // polygon's size (q.sc), shape, and side count (q.n) come from the
+  // circle packing the user's mesh produces, so editing the graph
+  // immediately changes every mini-rosette on the right.
+  void drawRosone2Cells() {
+    pa.pushStyle();
+    pa.stroke(220, 90, 80);
+    pa.strokeWeight(1.0f);
+    pa.noFill();
+    for (CycP q : pCyc.values()) {
+      if (!q.on) continue;
+      drawRosone2OnPolygon(q);
+    }
+    pa.popStyle();
+  }
+
+  void drawRosone2OnPolygon(CycP q) {
+    final float MID_R_F   = 0.62f;   // mid-ring radius / polygon circumradius
+    final float INNER_R_F = 0.30f;   // inner-ring radius / polygon circumradius
+    final float APEX_F    = 0.85f;   // outer-cell apex radius / mid-ring radius
+    final float APEX2_F   = 0.70f;   // inner-cell apex radius / inner-ring radius
+    final float PETAL_F   = 0.18f;   // lens petal sagitta / chord length
+
+    int N = q.n;
+    if (N < 3) return;
+    GPoint C = new GPoint(q.x, q.y);
+    float R = q.sc / 2.0f;
+
+    pa.ellipse(q.x, q.y, q.sc, q.sc);
+
+    pa.beginShape();
+    for (GPoint v : q.v) pa.vertex(v.x, v.y);
+    pa.endShape(PApplet.CLOSE);
+
+    for (int i = 0; i < N; ++i) {
+      GPoint p1 = q.v.get(i);
+      GPoint p2 = q.v.get((i + 1) % N);
+      float dx = p2.x - p1.x, dy = p2.y - p1.y;
+      float L = sqrt(dx * dx + dy * dy);
+      if (L < 1e-3f) continue;
+      drawArcBulge(pa, p1, p2, C, L * PETAL_F, 16);
+    }
+
+    GPoint[] W = scaleVerticesTowardCenter(q, MID_R_F);
+    GPoint[] U = scaleVerticesTowardCenter(q, INNER_R_F);
+
+    for (int i = 0; i < N; ++i) {
+      GPoint v1 = q.v.get(i);
+      GPoint v2 = q.v.get((i + 1) % N);
+      GPoint w1 = W[i];
+      GPoint w2 = W[(i + 1) % N];
+      GPoint mid = new GPoint((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
+      GPoint apex = pullToRadius(mid, C, R * MID_R_F * APEX_F);
+      pa.beginShape();
+      pa.vertex(v1.x, v1.y);
+      pa.vertex(v2.x, v2.y);
+      pa.vertex(w2.x, w2.y);
+      pa.vertex(apex.x, apex.y);
+      pa.vertex(w1.x, w1.y);
+      pa.endShape(PApplet.CLOSE);
+    }
+
+    pa.beginShape();
+    for (GPoint w : W) pa.vertex(w.x, w.y);
+    pa.endShape(PApplet.CLOSE);
+
+    for (int i = 0; i < N; ++i) {
+      GPoint w1 = W[i];
+      GPoint w2 = W[(i + 1) % N];
+      GPoint u1 = U[i];
+      GPoint u2 = U[(i + 1) % N];
+      GPoint mid = new GPoint((w1.x + w2.x) / 2, (w1.y + w2.y) / 2);
+      GPoint apex = pullToRadius(mid, C, R * INNER_R_F * APEX2_F);
+      pa.beginShape();
+      pa.vertex(w1.x, w1.y);
+      pa.vertex(w2.x, w2.y);
+      pa.vertex(u2.x, u2.y);
+      pa.vertex(apex.x, apex.y);
+      pa.vertex(u1.x, u1.y);
+      pa.endShape(PApplet.CLOSE);
+    }
+
+    drawStarPolygon(U, chooseStarSkip(N));
+  }
+
+  // Scale each vertex of q.v toward q's center by `factor`. Because every
+  // vertex of a CycP sits on the circumscribed circle (PattC.bPoly builds
+  // them at distance tau*R from center), this produces a smaller similar
+  // polygon at radius factor * R, with vertices on the same radials.
+  GPoint[] scaleVerticesTowardCenter(CycP q, float factor) {
+    GPoint[] out = new GPoint[q.n];
+    for (int i = 0; i < q.n; ++i) {
+      GPoint v = q.v.get(i);
+      out[i] = new GPoint(q.x + (v.x - q.x) * factor, q.y + (v.y - q.y) * factor);
+    }
+    return out;
+  }
+
+  // Project `p` onto the ray from `c` through `p`, scaled so the result is
+  // exactly `targetR` away from `c`. Used to place each pentagonal cell's
+  // apex at a chosen ring radius along the bisector of its base edge.
+  GPoint pullToRadius(GPoint p, GPoint c, float targetR) {
+    float dx = p.x - c.x, dy = p.y - c.y;
+    float r = sqrt(dx * dx + dy * dy);
+    if (r < 1e-6f) return new GPoint(c.x + targetR, c.y);
+    float k = targetR / r;
+    return new GPoint(c.x + dx * k, c.y + dy * k);
+  }
+
+  // Pick a star-polygon skip {n/skip} that produces a visually pleasing
+  // star: large enough to look pointy (skip > 1), but coprime-ish with n
+  // so the polygon traces a single connected line rather than collapsing
+  // to a smaller regular polygon. We aim for skip ≈ ⌈n/3⌉ which gives
+  // 6→2 (hexagram), 8→3 (octagram), 10→3 (decagram), etc., then walk
+  // outward to find a coprime skip when ⌈n/3⌉ shares a factor with n.
+  int chooseStarSkip(int n) {
+    if (n < 4) return 1;
+    int target = (n + 2) / 3;          // ⌈n/3⌉
+    if (target < 2) target = 2;
+    int maxSkip = (n - 1) / 2;
+    if (target > maxSkip) target = maxSkip;
+    for (int delta = 0; delta <= maxSkip; ++delta) {
+      int up   = target + delta;
+      int down = target - delta;
+      if (up >= 2 && up <= maxSkip && gcd2(n, up) == 1) return up;
+      if (down >= 2 && down <= maxSkip && gcd2(n, down) == 1) return down;
+    }
+    // No coprime skip found in range → fall back to ⌈n/3⌉; drawStarPolygon
+    // handles compound stars via multi-traversal so this still draws.
+    return max(2, target);
+  }
+
+  int gcd2(int a, int b) {
+    while (b != 0) { int t = b; b = a % b; a = t; }
+    return a;
+  }
+
+  // Draw a {n/skip} star polygon through `pts`. When gcd(n, skip) > 1 the
+  // single traversal would close after only n/gcd vertices, leaving the
+  // others unvisited — so we restart at each unvisited index, producing
+  // the correct compound (e.g. {6/2} = hexagram = two interlocked tris).
+  void drawStarPolygon(GPoint[] pts, int skip) {
+    int n = pts.length;
+    if (n < 2 || skip < 1) return;
+    boolean[] seen = new boolean[n];
+    for (int start = 0; start < n; ++start) {
+      if (seen[start]) continue;
+      pa.beginShape();
+      int idx = start;
+      do {
+        seen[idx] = true;
+        pa.vertex(pts[idx].x, pts[idx].y);
+        idx = (idx + skip) % n;
+      } while (idx != start);
+      pa.endShape(PApplet.CLOSE);
+    }
   }
 
   void drawL() {

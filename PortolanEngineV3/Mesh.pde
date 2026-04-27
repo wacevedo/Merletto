@@ -562,8 +562,12 @@ class Mesh {
   void calcCirclePacking() {
     // Match JS semantics (doubles). float is too imprecise for tolerance 1+1e-11.
     final double tolerance = 1.0 + 1e-11;
-    java.util.HashMap<Integer, java.util.ArrayList<Integer>> internal = new java.util.HashMap<Integer, java.util.ArrayList<Integer>>();
-    java.util.HashSet<Integer> externalSet = new java.util.HashSet<Integer>();
+    // LinkedHashMap so iteration order = ascending insertion order = ascending
+    // vertex index, mirroring JS's numeric-keyed object iteration. This is
+    // critical because `anyKey(internal)` (k1) and the convergence pass both
+    // depend on a deterministic, JS-compatible order.
+    java.util.LinkedHashMap<Integer, java.util.ArrayList<Integer>> internal = new java.util.LinkedHashMap<Integer, java.util.ArrayList<Integer>>();
+    java.util.LinkedHashSet<Integer> externalSet = new java.util.LinkedHashSet<Integer>();
     for (int idx = 0; idx < vert.size(); ++idx) {
       if (vertProps.get(idx).boundary) {
         externalSet.add(Integer.valueOf(idx));
@@ -606,7 +610,11 @@ class Mesh {
     }
     if (DEBUG_LOG) println("      [MESH] circlePack iterations=" + iter + " lastChange=" + lastChange);
     Integer k1 = internal.keySet().iterator().next();
-    java.util.HashMap<Integer, GPoint> placements = new java.util.HashMap<Integer, GPoint>();
+    // LinkedHashMap so the final loop visits placements in insertion order;
+    // computeBoundingBox depends on the (single) boundary vertex k2 receiving
+    // a center, which only happens because k1 is the smallest internal index
+    // (the same vertex JS picks via numeric-key iteration of `internal`).
+    java.util.LinkedHashMap<Integer, GPoint> placements = new java.util.LinkedHashMap<Integer, GPoint>();
     placements.put(k1, new GPoint(0, 0));
     int k2 = vertProps.get(k1).adj.get(0);
     placements.put(k2, new GPoint((float)(radii.get(k1).doubleValue() + radii.get(Integer.valueOf(k2)).doubleValue()), 0.0f));

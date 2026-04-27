@@ -17,16 +17,17 @@ import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 
 // ControlP5 widget names (must match across buildUI / controlEvent / sync).
-final String W_GRAPH_TYPE = "graphType";
-final String W_TRI_SIZE   = "triSize";
-final String W_KING_SIZE  = "kingSize";
-final String W_SPI_LAYERS = "spiderLayers";
-final String W_SPI_POINTS = "spiderPoints";
-final String W_RAND_PTS   = "randomPoints";
-final String W_CLEAR      = "clearGraph";
-final String W_EXP_JSON   = "exportGraphJson";
-final String W_EXP_GSVG   = "exportGraphSvg";
-final String W_IMP_JSON   = "importGraphJson";
+final String W_GRAPH_TYPE  = "graphType";
+final String W_TRI_SIZE    = "triSize";
+final String W_KING_SIZE   = "kingSize";
+final String W_SPI_LAYERS  = "spiderLayers";
+final String W_SPI_POINTS  = "spiderPoints";
+final String W_RAND_PTS    = "randomPoints";
+final String W_ROSONE_TYPE = "rosoneType";
+final String W_CLEAR       = "clearGraph";
+final String W_EXP_JSON    = "exportGraphJson";
+final String W_EXP_GSVG    = "exportGraphSvg";
+final String W_IMP_JSON    = "importGraphJson";
 
 final String W_TAU        = "tau";
 final String W_LAMBDA     = "lambda";
@@ -50,12 +51,20 @@ final String[] GRAPH_TYPE_LABELS = {
   "Random Delaunay Triangulation"
 };
 
+// Labels for the "Rosone Type" dropdown. Index → PortolanApp.rosoneKind.
+// 0 = "Rosone 1" (existing motif), 1 = "Rosone 2" (motif + outer enclosing
+// circle, convex-hull polygon, and lens petals along each hull edge).
+final String[] ROSONE_TYPE_LABELS = {
+  "Rosone 1",
+  "Rosone 2"
+};
+
 // ===== Layout constants (referenced by PortolanEngineV3.pde's card-drawing) =====
 // The right column is 340px wide. Each card is inset 12px on each side.
 final int UI_CARD_X  = CANVAS_W + 12;
 final int UI_CARD_W  = RIGHT_PANEL_W - 24;       // 316
 final int UI_ENC_Y1  = 12;                       // top of "Graphical Encoding" card
-final int UI_ENC_H   = 340;                      // height of encoding card
+final int UI_ENC_H   = 408;                      // height of encoding card (extra room for the Rosone Type dropdown)
 final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap) → 352
 final int UI_DEC_H   = 288;                      // height of decoded-pattern card
 
@@ -141,6 +150,30 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // button below never moves when switching between graph types.
   y += rowH + 20 + rowH + 14;
 
+  // Rosone Type dropdown — selects the visual style for the right-panel
+  // pattern. Sits between the size sliders and the action buttons so that
+  // the topology controls cluster at the top and the I/O actions at the
+  // bottom of the card.
+  cp.addLabel("lbl_rosoneType")
+    .setText("Rosone Type")
+    .setPosition(colX, y)
+    .setColorValue(UI_LABEL_COLOR);
+  y += 16;
+
+  java.util.List<String> rosoneItems = java.util.Arrays.asList(ROSONE_TYPE_LABELS);
+  cp.addScrollableList(W_ROSONE_TYPE)
+    .setPosition(colX, y)
+    .setSize(colW, 24 + 22 * ROSONE_TYPE_LABELS.length)
+    .setBarHeight(24)
+    .setItemHeight(22)
+    .addItems(rosoneItems)
+    .setType(ControlP5.LIST)
+    .setOpen(false)
+    .close()
+    .setValue(a.rosoneKind);
+  setRosoneTypeBarLabel(cp, a.rosoneKind);
+  y += 24 + 14;
+
   // Graph buttons
   cp.addButton(W_CLEAR)   .setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Clear Graph");
   y += btnH + gap;
@@ -184,8 +217,13 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   y += btnH + gap;
   cp.addButton(W_EXP_FULL).setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Full  (SVG)");
 
-  // Keep the dropdown's expanded list on top of every other widget (ControlP5
-  // renders in add order, so later additions otherwise paint above it).
+  // Keep dropdowns' expanded lists on top of every other widget (ControlP5
+  // renders in add order, so later additions otherwise paint above them).
+  // Order matters: the LAST bringToFront wins, so Graph Type ends on top —
+  // it expands the largest and would otherwise be hidden by the Rosone Type
+  // bar and the buttons below.
+  Controller rt = cp.getController(W_ROSONE_TYPE);
+  if (rt != null) rt.bringToFront();
   Controller gt = cp.getController(W_GRAPH_TYPE);
   if (gt != null) gt.bringToFront();
 }
@@ -198,6 +236,15 @@ void setGraphTypeBarLabel(ControlP5 cp, int idx) {
   if (c == null) return;
   int safe = constrain(idx, 0, GRAPH_TYPE_LABELS.length - 1);
   c.setCaptionLabel(GRAPH_TYPE_LABELS[safe]);
+}
+
+// Same idea as setGraphTypeBarLabel but for the Rosone Type dropdown.
+void setRosoneTypeBarLabel(ControlP5 cp, int idx) {
+  if (cp == null) return;
+  Controller c = cp.getController(W_ROSONE_TYPE);
+  if (c == null) return;
+  int safe = constrain(idx, 0, ROSONE_TYPE_LABELS.length - 1);
+  c.setCaptionLabel(ROSONE_TYPE_LABELS[safe]);
 }
 
 // Adjust slider visibility based on the current graph kind.
@@ -230,14 +277,17 @@ void onSliderChange(DragSlider s) {
   else if (n.equals(W_LAMBDA))     { app.lambda = v; }
 }
 
-// True when the graph-type dropdown is currently expanded. We suppress
-// slider hit-testing in that case so clicks on the dropdown's list items
-// don't also drag a slider underneath.
+// True when ANY of our dropdowns is currently expanded. We suppress slider
+// hit-testing in that case so clicks on a dropdown's list items don't also
+// drag a slider underneath.
 boolean isDropdownOpen() {
   if (cp5 == null) return false;
-  Controller c = cp5.getController(W_GRAPH_TYPE);
-  if (c instanceof ScrollableList) return ((ScrollableList) c).isOpen();
-  return false;
+  return isScrollableListOpen(W_GRAPH_TYPE) || isScrollableListOpen(W_ROSONE_TYPE);
+}
+
+boolean isScrollableListOpen(String name) {
+  Controller c = cp5.getController(name);
+  return (c instanceof ScrollableList) && ((ScrollableList) c).isOpen();
 }
 
 // Forward mouse events to any DragSlider that wants them. Returns true if
@@ -309,6 +359,13 @@ void controlEvent(ControlEvent ce) {
     if (gt instanceof ScrollableList) ((ScrollableList) gt).close();
     syncUIFromApp(cp5, app);
     app.setGraph(app.graphKind);
+  } else if (n.equals(W_ROSONE_TYPE)) {
+    int idx = (int) ce.getValue();
+    app.rosoneKind = constrain(idx, 0, ROSONE_TYPE_LABELS.length - 1);
+    setRosoneTypeBarLabel(cp5, app.rosoneKind);
+    Controller rt = cp5.getController(W_ROSONE_TYPE);
+    if (rt instanceof ScrollableList) ((ScrollableList) rt).close();
+    // No mesh recompute needed — Rosone 2 is a render-time overlay only.
   } else if (n.equals(W_SHOW_PACK)) {
     app.shPack = ce.getValue() > 0.5f;
   } else if (n.equals(W_SHOW_TILE)) {

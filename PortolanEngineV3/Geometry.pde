@@ -78,6 +78,84 @@ void sortGPointsByAngle(java.util.ArrayList<GPoint> pts, final float cx, final f
   });
 }
 
+// Convex hull via Andrew's monotone chain (O(n log n)). Returns hull vertices
+// in CCW order. Used by Rosone 2 to find the outer boundary of the pattern.
+java.util.ArrayList<GPoint> convexHullPoints(java.util.ArrayList<GPoint> in) {
+  int n = in.size();
+  if (n < 3) return new java.util.ArrayList<GPoint>(in);
+  java.util.ArrayList<GPoint> sorted = new java.util.ArrayList<GPoint>(in);
+  sorted.sort(new java.util.Comparator<GPoint>() {
+    public int compare(GPoint a, GPoint b) {
+      int c = Float.compare(a.x, b.x);
+      return c != 0 ? c : Float.compare(a.y, b.y);
+    }
+  });
+  java.util.ArrayList<GPoint> lower = new java.util.ArrayList<GPoint>();
+  for (GPoint p : sorted) {
+    while (lower.size() >= 2 && hullCross(lower.get(lower.size() - 2), lower.get(lower.size() - 1), p) <= 0) {
+      lower.remove(lower.size() - 1);
+    }
+    lower.add(p);
+  }
+  java.util.ArrayList<GPoint> upper = new java.util.ArrayList<GPoint>();
+  for (int i = sorted.size() - 1; i >= 0; --i) {
+    GPoint p = sorted.get(i);
+    while (upper.size() >= 2 && hullCross(upper.get(upper.size() - 2), upper.get(upper.size() - 1), p) <= 0) {
+      upper.remove(upper.size() - 1);
+    }
+    upper.add(p);
+  }
+  // Drop the last point of each list (same as first point of the other).
+  lower.remove(lower.size() - 1);
+  upper.remove(upper.size() - 1);
+  lower.addAll(upper);
+  return lower;
+}
+
+float hullCross(GPoint o, GPoint a, GPoint b) {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+// Render a circular arc from p1 → p2 that bows outward away from `inside`
+// by `bulge` pixels (the sagitta). The arc is approximated with line
+// segments, which lets us share the renderer with SVG export and avoids
+// Processing's `arc()` axis-aligned-ellipse limitations.
+//
+// Geometry: given chord length L and sagitta h, the arc's circle radius is
+//   r = h/2 + L^2/(8h)
+// and the circle center sits on the chord-perpendicular line on the side
+// opposite the bulge, at distance (r - h) from the chord midpoint.
+void drawArcBulge(PApplet pa, GPoint p1, GPoint p2, GPoint inside, float bulge, int segments) {
+  float dx = p2.x - p1.x, dy = p2.y - p1.y;
+  float L = sqrt(dx * dx + dy * dy);
+  if (L < 1e-4f || bulge < 1e-4f) {
+    pa.line(p1.x, p1.y, p2.x, p2.y);
+    return;
+  }
+  float mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+  // Unit perpendicular to the chord. Pick the side facing AWAY from `inside`.
+  float nx = -dy / L, ny = dx / L;
+  if ((inside.x - mx) * nx + (inside.y - my) * ny > 0) { nx = -nx; ny = -ny; }
+  float r = bulge / 2 + (L * L) / (8 * bulge);
+  float d = r - bulge;
+  // Arc center sits on the inside half (negate the outward normal).
+  float cx = mx - nx * d, cy = my - ny * d;
+  float a1 = atan2(p1.y - cy, p1.x - cx);
+  float a2 = atan2(p2.y - cy, p2.x - cx);
+  // Sweep the short way around: if the difference exceeds π, normalize.
+  float da = a2 - a1;
+  while (da >  PI) da -= TWO_PI;
+  while (da < -PI) da += TWO_PI;
+  GPoint prev = p1;
+  for (int i = 1; i <= segments; ++i) {
+    float t = (float) i / segments;
+    float ang = a1 + da * t;
+    GPoint cur = new GPoint(cx + r * cos(ang), cy + r * sin(ang));
+    pa.line(prev.x, prev.y, cur.x, cur.y);
+    prev = cur;
+  }
+}
+
 BoundingBox computeBoundingBox(Mesh m) {
   float left = 0, right = 0, top = 0, bottom = 0;
   for (int idx = 0; idx < m.numPoints(); idx++) {
