@@ -90,30 +90,34 @@ class PortolanApp {
   void drawRosone1Cells() {
     pa.pushStyle();
     pa.noFill();
-    pa.stroke(0, 155, 170);
-    pa.strokeWeight(0.75f);
+    Renderer r = new PARenderer(pa);
     if (shTile) {
+      pa.stroke(0, 155, 170);
+      pa.strokeWeight(0.75f);
       for (CycP q : pCyc.values()) {
         if (!q.on) continue;
-        pa.beginShape();
-        for (GPoint v : q.v) pa.vertex(v.x, v.y);
-        pa.endShape(PApplet.CLOSE);
+        renderPolygonClosed(r, cycPVerts(q));
       }
     }
     pa.stroke(220, 90, 80);
     pa.strokeWeight(1.0f);
     for (CycP q : pCyc.values()) {
       if (!q.on || q.n < 4) continue;
-      drawRosone1OnPolygon(q);
+      drawRosone1OnPolygon(r, q);
     }
     pa.popStyle();
   }
 
-  void drawRosone1OnPolygon(CycP q) {
-    int N = q.n;
-    GPoint[] V = new GPoint[N];
-    for (int i = 0; i < N; ++i) V[i] = q.v.get(i);
-    drawStarPolygon(V, chooseStarSkip(N));
+  void drawRosone1OnPolygon(Renderer r, CycP q) {
+    drawStarPolygon(r, cycPVerts(q), chooseStarSkip(q.n));
+  }
+
+  // Convenience: copy q's vertex list into a primitive array (which is
+  // what drawStarPolygon / renderPolygonClosed expect).
+  GPoint[] cycPVerts(CycP q) {
+    GPoint[] V = new GPoint[q.n];
+    for (int i = 0; i < q.n; ++i) V[i] = q.v.get(i);
+    return V;
   }
 
   // Rosone 2 — for each cyclic polygon produced by the packing, render a
@@ -141,14 +145,15 @@ class PortolanApp {
     pa.stroke(220, 90, 80);
     pa.strokeWeight(1.0f);
     pa.noFill();
+    Renderer r = new PARenderer(pa);
     for (CycP q : pCyc.values()) {
       if (!q.on) continue;
-      drawRosone2OnPolygon(q);
+      drawRosone2OnPolygon(r, q);
     }
     pa.popStyle();
   }
 
-  void drawRosone2OnPolygon(CycP q) {
+  void drawRosone2OnPolygon(Renderer r, CycP q) {
     final float MID_R_F   = 0.62f;   // mid-ring radius / polygon circumradius
     final float INNER_R_F = 0.30f;   // inner-ring radius / polygon circumradius
     final float APEX_F    = 0.85f;   // outer-cell apex radius / mid-ring radius
@@ -160,11 +165,9 @@ class PortolanApp {
     GPoint C = new GPoint(q.x, q.y);
     float R = q.sc / 2.0f;
 
-    pa.ellipse(q.x, q.y, q.sc, q.sc);
+    r.circle(q.x, q.y, q.sc);
 
-    pa.beginShape();
-    for (GPoint v : q.v) pa.vertex(v.x, v.y);
-    pa.endShape(PApplet.CLOSE);
+    renderPolygonClosed(r, cycPVerts(q));
 
     for (int i = 0; i < N; ++i) {
       GPoint p1 = q.v.get(i);
@@ -172,7 +175,7 @@ class PortolanApp {
       float dx = p2.x - p1.x, dy = p2.y - p1.y;
       float L = sqrt(dx * dx + dy * dy);
       if (L < 1e-3f) continue;
-      drawArcBulge(pa, p1, p2, C, L * PETAL_F, 16);
+      drawArcBulge(r, p1, p2, C, L * PETAL_F, 16);
     }
 
     GPoint[] W = scaleVerticesTowardCenter(q, MID_R_F);
@@ -181,40 +184,22 @@ class PortolanApp {
     for (int i = 0; i < N; ++i) {
       GPoint v1 = q.v.get(i);
       GPoint v2 = q.v.get((i + 1) % N);
-      GPoint w1 = W[i];
-      GPoint w2 = W[(i + 1) % N];
       GPoint mid = new GPoint((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
       GPoint apex = pullToRadius(mid, C, R * MID_R_F * APEX_F);
-      pa.beginShape();
-      pa.vertex(v1.x, v1.y);
-      pa.vertex(v2.x, v2.y);
-      pa.vertex(w2.x, w2.y);
-      pa.vertex(apex.x, apex.y);
-      pa.vertex(w1.x, w1.y);
-      pa.endShape(PApplet.CLOSE);
+      renderPolygonClosed(r, new GPoint[] { v1, v2, W[(i + 1) % N], apex, W[i] });
     }
 
-    pa.beginShape();
-    for (GPoint w : W) pa.vertex(w.x, w.y);
-    pa.endShape(PApplet.CLOSE);
+    renderPolygonClosed(r, W);
 
     for (int i = 0; i < N; ++i) {
       GPoint w1 = W[i];
       GPoint w2 = W[(i + 1) % N];
-      GPoint u1 = U[i];
-      GPoint u2 = U[(i + 1) % N];
       GPoint mid = new GPoint((w1.x + w2.x) / 2, (w1.y + w2.y) / 2);
       GPoint apex = pullToRadius(mid, C, R * INNER_R_F * APEX2_F);
-      pa.beginShape();
-      pa.vertex(w1.x, w1.y);
-      pa.vertex(w2.x, w2.y);
-      pa.vertex(u2.x, u2.y);
-      pa.vertex(apex.x, apex.y);
-      pa.vertex(u1.x, u1.y);
-      pa.endShape(PApplet.CLOSE);
+      renderPolygonClosed(r, new GPoint[] { w1, w2, U[(i + 1) % N], apex, U[i] });
     }
 
-    drawStarPolygon(U, chooseStarSkip(N));
+    drawStarPolygon(r, U, chooseStarSkip(N));
   }
 
   // Scale each vertex of q.v toward q's center by `factor`. Because every
@@ -273,20 +258,19 @@ class PortolanApp {
   // single traversal would close after only n/gcd vertices, leaving the
   // others unvisited — so we restart at each unvisited index, producing
   // the correct compound (e.g. {6/2} = hexagram = two interlocked tris).
-  void drawStarPolygon(GPoint[] pts, int skip) {
+  void drawStarPolygon(Renderer r, GPoint[] pts, int skip) {
     int n = pts.length;
     if (n < 2 || skip < 1) return;
     boolean[] seen = new boolean[n];
     for (int start = 0; start < n; ++start) {
       if (seen[start]) continue;
-      pa.beginShape();
       int idx = start;
       do {
         seen[idx] = true;
-        pa.vertex(pts[idx].x, pts[idx].y);
-        idx = (idx + skip) % n;
+        int next = (idx + skip) % n;
+        r.line(pts[idx].x, pts[idx].y, pts[next].x, pts[next].y);
+        idx = next;
       } while (idx != start);
-      pa.endShape(PApplet.CLOSE);
     }
   }
 

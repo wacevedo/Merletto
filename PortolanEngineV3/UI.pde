@@ -548,8 +548,11 @@ String graphToSvg(PortolanApp a) {
   return s.toString();
 }
 
-// Pattern SVG: emit the five-point stars (and optionally packing + tiling)
-// in the same canvas-local coordinates that drawAll() uses.
+// Pattern SVG: emit the active Rosone (1 or 2) and optionally the underlying
+// packing circles + cyclic-polygon outlines. We dispatch through the same
+// Renderer-based drawRosone1OnPolygon / drawRosone2OnPolygon methods that
+// drawAll() uses, so the SVG file is geometrically identical to what's on
+// screen — no parallel implementation to keep in sync.
 String patternToSvg(PortolanApp a, boolean includePackingAndTiling) {
   StringBuilder s = new StringBuilder();
   s.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
@@ -561,35 +564,33 @@ String patternToSvg(PortolanApp a, boolean includePackingAndTiling) {
     CANVAS_W, CANVAS_H));
 
   if (includePackingAndTiling) {
-    // Packing circles
     s.append("  <g id=\"packing\" fill=\"rgba(240,173,78,0.16)\" stroke=\"none\">\n");
     for (PattC c : a.pCirc.values()) {
       s.append(String.format(java.util.Locale.US,
         "    <circle cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"/>\n", c.x, c.y, c.d / 2.0f));
     }
     s.append("  </g>\n");
-    // Tiling edges
     s.append("  <g id=\"tiling\" stroke=\"#888888\" stroke-width=\"0.75\" fill=\"none\">\n");
-    final StringBuilder tileBuf = s;
+    SVGRenderer tileR = new SVGRenderer(s, "    ");
     for (CycP q : a.pCyc.values()) {
-      q.cE(a.lambda, (p0, p1) -> {
-        tileBuf.append(String.format(java.util.Locale.US,
-          "    <line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
-          p0.x, p0.y, p1.x, p1.y));
-      });
+      if (!q.on) continue;
+      renderPolygonClosed(tileR, a.cycPVerts(q));
     }
     s.append("  </g>\n");
   }
 
-  // Stars — the decoded pattern proper
   s.append("  <g id=\"pattern\" stroke=\"#dd5c50\" stroke-width=\"1\" fill=\"none\">\n");
-  final StringBuilder patBuf = s;
-  for (Pent t : a.p5) {
-    t.cE(a.lambda, (p0, p1) -> {
-      patBuf.append(String.format(java.util.Locale.US,
-        "    <line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
-        p0.x, p0.y, p1.x, p1.y));
-    });
+  SVGRenderer patR = new SVGRenderer(s, "    ");
+  if (a.rosoneKind == 1) {
+    for (CycP q : a.pCyc.values()) {
+      if (!q.on) continue;
+      a.drawRosone2OnPolygon(patR, q);
+    }
+  } else {
+    for (CycP q : a.pCyc.values()) {
+      if (!q.on || q.n < 4) continue;
+      a.drawRosone1OnPolygon(patR, q);
+    }
   }
   s.append("  </g>\n</svg>\n");
   return s.toString();

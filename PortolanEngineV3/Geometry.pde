@@ -4,6 +4,56 @@
 // become non-static inner classes). Top-level `static` methods aren't allowed
 // inside inner classes, so we keep helpers as plain top-level functions.
 
+// Output abstraction so the same drawing code can target either Processing's
+// PApplet OR an SVG StringBuilder. Drawing primitives (lines and circles) are
+// emitted via a Renderer; concrete subclasses translate them to PApplet calls
+// for live rendering, or to SVG <line>/<circle> elements for export.
+//
+// This is what makes "Export Pattern SVG" / "Export Full SVG" produce the
+// exact same Rosone 1 / Rosone 2 figure the canvas shows — drawAll() and
+// patternToSvg() both call drawRosone1OnPolygon / drawRosone2OnPolygon, just
+// with different Renderer implementations.
+interface Renderer {
+  void line(float x1, float y1, float x2, float y2);
+  void circle(float cx, float cy, float diameter);
+}
+
+class PARenderer implements Renderer {
+  PApplet pa;
+  PARenderer(PApplet pa) { this.pa = pa; }
+  public void line(float x1, float y1, float x2, float y2) { pa.line(x1, y1, x2, y2); }
+  public void circle(float cx, float cy, float d) { pa.ellipse(cx, cy, d, d); }
+}
+
+class SVGRenderer implements Renderer {
+  StringBuilder sb;
+  String prefix;
+  SVGRenderer(StringBuilder sb, String prefix) { this.sb = sb; this.prefix = prefix; }
+  public void line(float x1, float y1, float x2, float y2) {
+    sb.append(prefix).append(String.format(java.util.Locale.US,
+      "<line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
+      x1, y1, x2, y2));
+  }
+  public void circle(float cx, float cy, float d) {
+    sb.append(prefix).append(String.format(java.util.Locale.US,
+      "<circle cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"/>\n",
+      cx, cy, d / 2.0f));
+  }
+}
+
+// Render a closed polygon outline as a sequence of line segments. Works with
+// any Renderer — SVG path data is composed of <line> elements and PApplet
+// would just call line() in sequence.
+void renderPolygonClosed(Renderer r, GPoint[] pts) {
+  int n = pts.length;
+  if (n < 2) return;
+  for (int i = 0; i < n; ++i) {
+    GPoint p1 = pts[i];
+    GPoint p2 = pts[(i + 1) % n];
+    r.line(p1.x, p1.y, p2.x, p2.y);
+  }
+}
+
 float cross(GPoint vec0, GPoint vec1) {
   return vec0.x * vec1.y - vec0.y * vec1.x;
 }
@@ -118,26 +168,26 @@ float hullCross(GPoint o, GPoint a, GPoint b) {
 
 // Render a circular arc from p1 → p2 that bows outward away from `inside`
 // by `bulge` pixels (the sagitta). The arc is approximated with line
-// segments, which lets us share the renderer with SVG export and avoids
-// Processing's `arc()` axis-aligned-ellipse limitations.
+// segments emitted through a Renderer, which lets the same code drive both
+// the Processing canvas and SVG export.
 //
 // Geometry: given chord length L and sagitta h, the arc's circle radius is
 //   r = h/2 + L^2/(8h)
 // and the circle center sits on the chord-perpendicular line on the side
 // opposite the bulge, at distance (r - h) from the chord midpoint.
-void drawArcBulge(PApplet pa, GPoint p1, GPoint p2, GPoint inside, float bulge, int segments) {
+void drawArcBulge(Renderer r, GPoint p1, GPoint p2, GPoint inside, float bulge, int segments) {
   float dx = p2.x - p1.x, dy = p2.y - p1.y;
   float L = sqrt(dx * dx + dy * dy);
   if (L < 1e-4f || bulge < 1e-4f) {
-    pa.line(p1.x, p1.y, p2.x, p2.y);
+    r.line(p1.x, p1.y, p2.x, p2.y);
     return;
   }
   float mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
   // Unit perpendicular to the chord. Pick the side facing AWAY from `inside`.
   float nx = -dy / L, ny = dx / L;
   if ((inside.x - mx) * nx + (inside.y - my) * ny > 0) { nx = -nx; ny = -ny; }
-  float r = bulge / 2 + (L * L) / (8 * bulge);
-  float d = r - bulge;
+  float rad = bulge / 2 + (L * L) / (8 * bulge);
+  float d = rad - bulge;
   // Arc center sits on the inside half (negate the outward normal).
   float cx = mx - nx * d, cy = my - ny * d;
   float a1 = atan2(p1.y - cy, p1.x - cx);
@@ -150,8 +200,8 @@ void drawArcBulge(PApplet pa, GPoint p1, GPoint p2, GPoint inside, float bulge, 
   for (int i = 1; i <= segments; ++i) {
     float t = (float) i / segments;
     float ang = a1 + da * t;
-    GPoint cur = new GPoint(cx + r * cos(ang), cy + r * sin(ang));
-    pa.line(prev.x, prev.y, cur.x, cur.y);
+    GPoint cur = new GPoint(cx + rad * cos(ang), cy + rad * sin(ang));
+    r.line(prev.x, prev.y, cur.x, cur.y);
     prev = cur;
   }
 }
