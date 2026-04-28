@@ -11,6 +11,13 @@ class PortolanApp {
   int mode; // 0 v 1 e
   int sel = -1;
   float tau = TAU_DEFAULT, lambda = LAMBDA_DEFAULT;
+  // Inner-circle radius as a fraction of the packing circle (q.sc / 2).
+  // Each rosone uses this for its primary "inner ring" — the central
+  // star's tip circle (Rosone 1 / 2), the central rosette's first ring
+  // (Rosone 3), or the rhombus tessellation's inner-vertex ring
+  // (Rosone 4). Clamped to stay strictly inside the outer rosette
+  // (tau-driven) at draw time via effectiveInnerFactor().
+  float innerTau = INNER_TAU_DEFAULT;
   int triSz = TRI_SIZE_DEF, kSz = KING_SIZE_DEF;
   int sLay = SPIDER_LAYERS_DEF, sPt = SPIDER_POINTS_DEF, rN = RAND_POINTS_DEF;
   boolean shPack = false, shTile = false;
@@ -156,8 +163,13 @@ class PortolanApp {
     // the packing circle, tau=0.85 → 85% of the way out, etc.). lambda
     // picks the chord skip {n/skip}: low λ → small skip (near polygon,
     // blunt), high λ → max skip (sharpest, deepest star points).
-    drawStarPolygon(r, scaleVerticesTowardCenter(q, tau),
-                    chooseStarSkipLambda(q.n, lambdaSharpness()));
+    int skip = chooseStarSkipLambda(q.n, lambdaSharpness());
+    drawStarPolygon(r, scaleVerticesTowardCenter(q, tau), skip);
+    // Inner concentric chord star at the "inner circle" radius. The
+    // outer chord star's logic is untouched; this is an additive layer
+    // controlled exclusively by Tau (innerTau), giving Rosone 1 a
+    // visible nested rosette whose size scales with the new slider.
+    drawStarPolygon(r, scaleVerticesTowardCenter(q, effectiveInnerFactor()), skip);
   }
 
   // Convenience: copy q's vertex list into a primitive array (which is
@@ -209,11 +221,16 @@ class PortolanApp {
     // the center, sharpening the inner star points. The central
     // {n/skip} star also uses the λ-driven skip so its tips match.
     float S = lambdaSharpness();
-    final float MID_R_F   = 0.62f;
-    final float INNER_R_F = 0.30f;
-    final float APEX_F    = lerp(1.00f, 0.55f, S);  // outer-cell apex / mid-ring
-    final float APEX2_F   = lerp(0.95f, 0.50f, S);  // inner-cell apex / inner-ring
-    final float PETAL_F   = lerp(0.04f, 0.30f, S);  // lens sagitta / chord
+    final float MID_R_F   = 0.62f;                  // mid-ring fraction of outer rosette
+    // Inner ring (where the central star's tips sit) is driven by the
+    // Tau slider as a direct fraction of the packing-circle radius.
+    // INNER_R_F is therefore derived: it has to be relative to the
+    // outer rosette (which is tau * R_pack), so INNER_R_F = innerTau / tau.
+    final float innerFactor = effectiveInnerFactor();
+    final float INNER_R_F = tau > 1e-3f ? innerFactor / tau : 0.30f;
+    final float APEX_F    = lerp(1.00f, 0.55f, S);
+    final float APEX2_F   = lerp(0.95f, 0.50f, S);
+    final float PETAL_F   = lerp(0.04f, 0.30f, S);
 
     int N = q.n;
     if (N < 3) return;
@@ -317,11 +334,15 @@ class PortolanApp {
     // inner chord star's skip — higher λ = sharper petals + deeper
     // chord star intersections.
     float S = lambdaSharpness();
-    float r1 = rosR * 0.18f;
     float r2 = rosR * 0.42f;
     float r3 = rosR * 0.65f;
     float r3ext = r3 * lerp(1.00f, 1.22f, S);
     float r4 = rosR * 0.95f;
+    // r1 (the central rosette's first ring) is driven by the new Tau
+    // slider as a fraction of the packing-circle radius (q.sc / 2 = R).
+    // Clamped to be strictly inside r2 so the cross-sector diagonals
+    // (ring1 → ring2) don't invert when the user pushes Tau very high.
+    float r1 = constrain(effectiveInnerFactor() * R, R * 0.05f, r2 * 0.85f);
     int innerSkip = chooseStarSkipLambda(n, S);
 
     float a0 = atan2(q.v.get(0).y - q.y, q.v.get(0).x - q.x);
@@ -457,14 +478,23 @@ class PortolanApp {
     // packing circle. The rhombus-condition formula stays the same; we
     // just substitute the tau-scaled outer radius.
     float R = q.sc / 2.0f * tau;
-    // rhombus condition: rInner = R / (2 cos π/N) makes every kite a
-    // true rhombus. lambda scales this around the rhombus value:
-    //   S=0 → rInner big (kites flat/wide, V tips blunt)
-    //   S=1 → rInner small (kites elongated radially, V tips sharp)
-    // Default λ=0.42 (S=0.6) lands close to the rhombus condition.
+    // rInner (the inner W ring on which the kite "outer base" vertices
+    // sit) is now driven by the new Tau slider as a direct fraction of
+    // the packing-circle radius. effectiveInnerFactor() clamps it
+    // strictly inside the outer V ring (which is tau * R_pack), so the
+    // kites never invert no matter how the two sliders are crossed.
+    // lambda's old kite-shape scaling has been retired here — innerTau
+    // now owns the inner-ring geometry — but we keep a small lambda
+    // bias so the slider still nudges the kite proportions: high λ
+    // pulls W slightly further toward center (sharper V tips), low λ
+    // pushes it slightly further out (blunter tips).
     float S = lambdaSharpness();
-    float rhombusR = R / (2.0f * cos(PI / N));
-    float rInner = rhombusR * lerp(1.35f, 0.55f, S);
+    float R_pack = q.sc / 2.0f;
+    // lambda multiplier stays in [0, 1] so rInner is always ≤
+    // effectiveInnerFactor * R_pack — and that's already clamped below
+    // the outer V ring, so the kites can't invert no matter how the
+    // sliders are crossed.
+    float rInner = effectiveInnerFactor() * R_pack * lerp(1.00f, 0.75f, S);
 
     GPoint[] V = scaleVerticesTowardCenter(q, tau);
 
@@ -538,6 +568,15 @@ class PortolanApp {
   // Default λ = 0.42 → S = 0.6, a moderately sharp look.
   float lambdaSharpness() {
     return constrain((lambda - 0.3f) / 0.2f, 0.0f, 1.0f);
+  }
+
+  // Inner-ring radius as a fraction of the packing circle, clamped so it
+  // never reaches the outer rosette (whose fraction is tau). The clamp
+  // keeps the inner star strictly inside the outer star even when the
+  // user slides Tau higher than Star Size — instead of exploding outside,
+  // the inner ring caps just inside the outer one.
+  float effectiveInnerFactor() {
+    return constrain(innerTau, 0.0f, tau * 0.95f);
   }
 
   // λ-aware star skip picker. Interpolates target skip from 2 (blunt,

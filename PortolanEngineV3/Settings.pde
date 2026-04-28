@@ -22,6 +22,12 @@ final int LEFT_PANEL_W = 0;
 // Pattern parameters
 final float TAU_DEFAULT = 0.85f;
 final float LAMBDA_DEFAULT = 0.42f;
+// Inner-circle radius / packing-circle radius. Default 0.30 keeps every
+// rosone's inner ring well inside its mid/outer rings at startup
+// (Rosone 2 used to hardcode INNER_R_F = 0.30, so this preserves a
+// familiar look). Clamped at draw time so it never exceeds tau (the
+// outer rosette's fraction of the packing circle).
+final float INNER_TAU_DEFAULT = 0.30f;
 
 // Flip DEBUG_LOG to true when diagnosing Mesh / setGraph behavior. It's
 // kept off by default because each println flushes to the Processing

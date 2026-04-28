@@ -29,7 +29,8 @@ final String W_EXP_JSON    = "exportGraphJson";
 final String W_EXP_GSVG    = "exportGraphSvg";
 final String W_IMP_JSON    = "importGraphJson";
 
-final String W_TAU        = "tau";
+final String W_TAU        = "tau";          // slider label: "Star Size"
+final String W_INNER_TAU  = "innerTau";      // slider label: "Tau" (inner-circle radius)
 final String W_LAMBDA     = "lambda";
 final String W_ZOOM       = "rightZoom";
 final String W_LINE_SCALE = "lineScale";
@@ -77,7 +78,7 @@ final int UI_CARD_W  = RIGHT_PANEL_W - 24;       // 316
 final int UI_ENC_Y1  = 12;                       // top of "Graphical Encoding" card
 final int UI_ENC_H   = 408;                      // height of encoding card (extra room for the Rosone Type dropdown)
 final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap) → 352
-final int UI_DEC_H   = 346;                      // height of decoded-pattern card (room for Zoom + Line Weight sliders at the top)
+final int UI_DEC_H   = 384;                      // height of decoded-pattern card (room for Zoom + Line Weight + Star Size + Tau + Lambda sliders)
 
 // Inner padding inside each card (text/widgets kept off the rounded border).
 final int UI_CARD_PAD_X = 14;
@@ -211,9 +212,17 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   y += rowH + 16;
 
   // Pattern-shape sliders — 2 decimal places, no integer snap.
-  addSlider(W_TAU,    colX, y, colW, 0.4f, 1.0f, a.tau,    2, false, "tau (star size)");
+  // Star Size = outer-rosette radius / packing-circle radius (the old
+  //             "tau" — semantics unchanged, label simplified).
+  // Tau       = inner-circle radius / packing-circle radius (new, drives
+  //             each rosone's inner ring; clamped to stay inside the
+  //             outer rosette at draw time).
+  // Lambda    = star-tip sharpness (chord skip / cell apex pull).
+  addSlider(W_TAU,       colX, y, colW, 0.4f, 1.0f, a.tau,      2, false, "Star Size");
   y += rowH + 16;
-  addSlider(W_LAMBDA, colX, y, colW, 0.3f, 0.5f, a.lambda, 2, false, "lambda (sharpness)");
+  addSlider(W_INNER_TAU, colX, y, colW, 0.1f, 0.9f, a.innerTau, 2, false, "Tau");
+  y += rowH + 16;
+  addSlider(W_LAMBDA,    colX, y, colW, 0.3f, 0.5f, a.lambda,   2, false, "lambda (sharpness)");
   y += rowH + 18;
 
   Toggle togPack = cp.addToggle(W_SHOW_PACK)
@@ -295,8 +304,9 @@ void onSliderChange(DragSlider s) {
   else if (n.equals(W_SPI_LAYERS)) { app.sLay  = (int) v; if (app.graphKind == 2) app.setGraph(2); }
   else if (n.equals(W_SPI_POINTS)) { app.sPt   = (int) v; if (app.graphKind == 2) app.setGraph(2); }
   else if (n.equals(W_RAND_PTS))   { app.rN    = (int) v; if (app.graphKind == 3) app.setGraph(3); }
-  else if (n.equals(W_TAU))        { app.tau    = v; }
-  else if (n.equals(W_LAMBDA))     { app.lambda = v; }
+  else if (n.equals(W_TAU))        { app.tau      = v; }
+  else if (n.equals(W_INNER_TAU))  { app.innerTau = v; }
+  else if (n.equals(W_LAMBDA))     { app.lambda   = v; }
   else if (n.equals(W_ZOOM))       { app.rightZoom = v; }
   else if (n.equals(W_LINE_SCALE)) { app.lineScale = v; }
 }
