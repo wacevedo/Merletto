@@ -149,7 +149,11 @@ class PortolanApp {
   }
 
   void drawRosone1OnPolygon(Renderer r, CycP q) {
-    drawStarPolygon(r, cycPVerts(q), chooseStarSkip(q.n));
+    // q.v is the full packing-circle polygon; tau scales the chord-star
+    // vertices toward the cell's center so the star size becomes a
+    // fraction of the enclosing packing circle (tau=1.0 → vertices on
+    // the packing circle, tau=0.85 → 85% of the way out, etc.).
+    drawStarPolygon(r, scaleVerticesTowardCenter(q, tau), chooseStarSkip(q.n));
   }
 
   // Convenience: copy q's vertex list into a primitive array (which is
@@ -194,8 +198,8 @@ class PortolanApp {
   }
 
   void drawRosone2OnPolygon(Renderer r, CycP q) {
-    final float MID_R_F   = 0.62f;   // mid-ring radius / polygon circumradius
-    final float INNER_R_F = 0.30f;   // inner-ring radius / polygon circumradius
+    final float MID_R_F   = 0.62f;   // mid-ring radius / rosette outer radius
+    final float INNER_R_F = 0.30f;   // inner-ring radius / rosette outer radius
     final float APEX_F    = 0.85f;   // outer-cell apex radius / mid-ring radius
     final float APEX2_F   = 0.70f;   // inner-cell apex radius / inner-ring radius
     final float PETAL_F   = 0.18f;   // lens petal sagitta / chord length
@@ -203,27 +207,34 @@ class PortolanApp {
     int N = q.n;
     if (N < 3) return;
     GPoint C = new GPoint(q.x, q.y);
-    float R = q.sc / 2.0f;
 
-    r.circle(q.x, q.y, q.sc);
+    // Outer ring: tau scales the polygon vertices toward C, making the
+    // rosette's outer extent a fraction of the packing circle. All
+    // nested rings (mid, inner) are then proportional to this outer
+    // ring, so the entire motif scales together while q.sc / q.v stay
+    // anchored to the (full) packing circle.
+    GPoint[] V = scaleVerticesTowardCenter(q, tau);
+    float R = q.sc / 2.0f * tau;
 
-    renderPolygonClosed(r, cycPVerts(q));
+    r.circle(q.x, q.y, q.sc * tau);
+
+    renderPolygonClosed(r, V);
 
     for (int i = 0; i < N; ++i) {
-      GPoint p1 = q.v.get(i);
-      GPoint p2 = q.v.get((i + 1) % N);
+      GPoint p1 = V[i];
+      GPoint p2 = V[(i + 1) % N];
       float dx = p2.x - p1.x, dy = p2.y - p1.y;
       float L = sqrt(dx * dx + dy * dy);
       if (L < 1e-3f) continue;
       drawArcBulge(r, p1, p2, C, L * PETAL_F, 16);
     }
 
-    GPoint[] W = scaleVerticesTowardCenter(q, MID_R_F);
-    GPoint[] U = scaleVerticesTowardCenter(q, INNER_R_F);
+    GPoint[] W = scaleVerticesTowardCenter(q, tau * MID_R_F);
+    GPoint[] U = scaleVerticesTowardCenter(q, tau * INNER_R_F);
 
     for (int i = 0; i < N; ++i) {
-      GPoint v1 = q.v.get(i);
-      GPoint v2 = q.v.get((i + 1) % N);
+      GPoint v1 = V[i];
+      GPoint v2 = V[(i + 1) % N];
       GPoint mid = new GPoint((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
       GPoint apex = pullToRadius(mid, C, R * MID_R_F * APEX_F);
       renderPolygonClosed(r, new GPoint[] { v1, v2, W[(i + 1) % N], apex, W[i] });
@@ -285,10 +296,11 @@ class PortolanApp {
   void drawRosone3OnPolygon(Renderer r, CycP q) {
     int n = constrain(q.n * 2, 12, 16);
     float R = q.sc / 2.0f;
-    // Apothem-based outer extent: cos(PI/q.n) * R is the polygon's apothem
-    // (distance from center to edge midpoint). Multiplying by 0.95 keeps
-    // the rosette strictly inside that, so an annular gap always remains.
-    float rosR = R * cos(PI / max(3, q.n)) * 0.95f;
+    // tau scales the rosette outward toward the polygon's apothem
+    // (cos(PI/q.n) * R = distance from center to a polygon edge mid).
+    // tau=1.0 → rosette touches the polygon edges; tau<1.0 → leaves an
+    // annular gap inside the polygon for drawRosone3Gaps() to fill.
+    float rosR = tau * R * cos(PI / max(3, q.n));
     float r1 = rosR * 0.18f;
     float r2 = rosR * 0.42f;
     float r3 = rosR * 0.65f;
@@ -423,10 +435,15 @@ class PortolanApp {
   void drawRosone4OnPolygon(Renderer r, CycP q) {
     int N = q.n;
     if (N < 4) return;
-    float R = q.sc / 2.0f;
+    // tau scales the entire kite tessellation (outer V ring + inner W
+    // ring + polygon outline) toward the cell's center, so the whole
+    // Rosone 4 motif sizes itself as a fraction of the enclosing
+    // packing circle. The rhombus-condition formula stays the same; we
+    // just substitute the tau-scaled outer radius.
+    float R = q.sc / 2.0f * tau;
     float rInner = R / (2.0f * cos(PI / N));
 
-    GPoint[] V = cycPVerts(q);
+    GPoint[] V = scaleVerticesTowardCenter(q, tau);
 
     // W[k] lies on the C→edgeMidpoint(V[k], V[k+1]) ray, at radius rInner
     // from C. For a regular N-gon this is the angle bisector between
@@ -466,9 +483,12 @@ class PortolanApp {
   }
 
   // Scale each vertex of q.v toward q's center by `factor`. Because every
-  // vertex of a CycP sits on the circumscribed circle (PattC.bPoly builds
-  // them at distance tau*R from center), this produces a smaller similar
-  // polygon at radius factor * R, with vertices on the same radials.
+  // vertex of a CycP sits on the circumscribed packing circle (pack()
+  // calls PattC.bPoly with tau = 1.0, so q.v is anchored to the full
+  // packing circle), this produces a smaller similar polygon at radius
+  // factor * R, with vertices on the same radials. The rosone draws use
+  // this with the tau slider as the factor to scale star/motif size as
+  // a fraction of the enclosing packing circle.
   GPoint[] scaleVerticesTowardCenter(CycP q, float factor) {
     GPoint[] out = new GPoint[q.n];
     for (int i = 0; i < q.n; ++i) {
@@ -624,8 +644,13 @@ class PortolanApp {
     }
     pcPop(mesh, pCirc);
     pCyc.clear();
+    // Build cyclic polygons at the FULL packing-circle radius (tau = 1.0).
+    // tau no longer shrinks the polygon itself — each rosone applies tau
+    // to its own inner geometry instead, so the slider controls the star
+    // size *relative to the enclosing packing circle* (the user's mental
+    // model) rather than scaling the whole rosone uniformly.
     for (PattC c : pCirc.values()) {
-      if (!c.bd) c.bPoly(tau, pCyc);
+      if (!c.bd) c.bPoly(1.0f, pCyc);
     }
   }
 

@@ -211,7 +211,7 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   y += rowH + 16;
 
   // Pattern-shape sliders — 2 decimal places, no integer snap.
-  addSlider(W_TAU,    colX, y, colW, 0.7f, 0.9f, a.tau,    2, false, "tau (star size)");
+  addSlider(W_TAU,    colX, y, colW, 0.4f, 1.0f, a.tau,    2, false, "tau (star size)");
   y += rowH + 16;
   addSlider(W_LAMBDA, colX, y, colW, 0.3f, 0.5f, a.lambda, 2, false, "lambda (sharpness)");
   y += rowH + 18;
