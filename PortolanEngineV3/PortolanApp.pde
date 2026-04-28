@@ -106,6 +106,10 @@ class PortolanApp {
         // Rosone 3 — gothic per-cell rosette + gap-filler polygon
         // outlines as the irregular surrounding network.
         drawRosone3Cells();
+      } else if (rosoneKind == 3) {
+        // Rosone 4 — N kite/rhombus cells fanning out from each
+        // cyclic polygon's center (rhombus tessellation of the cell).
+        drawRosone4Cells();
       } else {
         // Rosone 1 — chord-based {N/skip} star polygon per cell. shTile
         // still draws the polygon outlines when enabled.
@@ -376,6 +380,89 @@ class PortolanApp {
       if (!q.on) continue;
       renderPolygonClosed(r, cycPVerts(q));
     }
+  }
+
+  // ===================================================================
+  // Rosone 4 — N kite / rhombus cells fanning out from each cell center
+  // ===================================================================
+  //
+  // For each cyclic polygon q in pCyc:
+  //
+  //   • Use q's vertices V[0..N-1] as the OUTER vertices of N kite cells
+  //     (each kite's apex). Each V[k] sits on q's circumscribed circle
+  //     at radius R = q.sc / 2.
+  //   • Build an inner ring W[0..N-1] where W[k] sits on the bisector
+  //     ray of edge V[k]–V[k+1] (the line from C through that edge's
+  //     midpoint), at radius rInner = R / (2·cos(π/N)). For a regular
+  //     N-gon this radius makes every kite a TRUE rhombus (all four
+  //     sides equal); for irregular cells the rhombus condition only
+  //     holds approximately, but the kite construction stays valid.
+  //   • Each cell becomes a kite with vertices (C, W[k-1], V[k], W[k]).
+  //     Drawn as: N spokes from C to each W, plus 2N edges V↔W (each
+  //     V connects to the W on its left and right), plus the polygon
+  //     outline as the outer boundary.
+  //
+  // Triangles (q.n = 3) are skipped because rInner = R/(2·cos(60°)) = R
+  // would put the inner ring on top of the outer ring (degenerate). For
+  // N ≥ 4 the construction is well-defined.
+  //
+  // Same per-polygon, graph-driven model as the other Rosones.
+  void drawRosone4Cells() {
+    pa.pushStyle();
+    pa.noFill();
+    pa.stroke(220, 90, 80);
+    pa.strokeWeight(1.5f * lineScale);
+    Renderer r = new PARenderer(pa);
+    for (CycP q : pCyc.values()) {
+      if (!q.on || q.n < 4) continue;
+      drawRosone4OnPolygon(r, q);
+    }
+    pa.popStyle();
+  }
+
+  void drawRosone4OnPolygon(Renderer r, CycP q) {
+    int N = q.n;
+    if (N < 4) return;
+    float R = q.sc / 2.0f;
+    float rInner = R / (2.0f * cos(PI / N));
+
+    GPoint[] V = cycPVerts(q);
+
+    // W[k] lies on the C→edgeMidpoint(V[k], V[k+1]) ray, at radius rInner
+    // from C. For a regular N-gon this is the angle bisector between
+    // V[k] and V[k+1]. For irregular q's we still pick the geometric
+    // edge midpoint direction, which keeps adjacent V↔W edges of similar
+    // length even if not exactly equal.
+    GPoint[] W = new GPoint[N];
+    for (int k = 0; k < N; ++k) {
+      GPoint a = V[k], b = V[(k + 1) % N];
+      float mx = (a.x + b.x) * 0.5f, my = (a.y + b.y) * 0.5f;
+      float dx = mx - q.x, dy = my - q.y;
+      float d = sqrt(dx * dx + dy * dy);
+      if (d < 1e-6f) { W[k] = new GPoint(mx, my); continue; }
+      float s = rInner / d;
+      W[k] = new GPoint(q.x + dx * s, q.y + dy * s);
+    }
+
+    // Spokes: center → each inner-ring vertex. These are the radial
+    // diagonals of the kite cells.
+    for (int k = 0; k < N; ++k) {
+      r.line(q.x, q.y, W[k].x, W[k].y);
+    }
+
+    // Each outer V[k] is the apex of one kite; it connects to the two
+    // inner-ring vertices on either side of it (W[k-1] on the left,
+    // W[k] on the right). These are the kite's outer side edges.
+    for (int k = 0; k < N; ++k) {
+      GPoint v = V[k];
+      GPoint wL = W[(k - 1 + N) % N];
+      GPoint wR = W[k];
+      r.line(v.x, v.y, wL.x, wL.y);
+      r.line(v.x, v.y, wR.x, wR.y);
+    }
+
+    // Polygon outline — the kite cells live INSIDE this boundary.
+    renderPolygonClosed(r, V);
   }
 
   // Scale each vertex of q.v toward q's center by `factor`. Because every

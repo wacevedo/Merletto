@@ -60,10 +60,14 @@ final String[] GRAPH_TYPE_LABELS = {
 // 2 = "Rosone 3" — gothic per-cell rosette inscribed in a smaller circle,
 //                  paired with a separate gap-filler that draws the cyclic
 //                  polygon outlines as the irregular network around them.
+// 3 = "Rosone 4" — N kite/rhombus cells fanning out from the cell's center
+//                  (rhombus tessellation; true rhombi when q is a regular
+//                  N-gon), bounded by the polygon outline.
 final String[] ROSONE_TYPE_LABELS = {
   "Rosone 1",
   "Rosone 2",
-  "Rosone 3"
+  "Rosone 3",
+  "Rosone 4"
 };
 
 // ===== Layout constants (referenced by PortolanEngineV3.pde's card-drawing) =====
