@@ -123,10 +123,11 @@ class PortolanApp {
   }
 
   // Rosone 1 — chord-based star polygon per cyclic polygon. For each q in
-  // pCyc, draw the {q.n / chooseStarSkip(q.n)} star polygon connecting its
-  // vertices. The intersections between chords carve out the rosette's
-  // pentagonal cells and central star automatically — no separate cell
-  // construction needed (which is what the reference image shows).
+  // pCyc, draw the {q.n / skip} star polygon connecting its vertices,
+  // where skip is picked from the lambda slider (low λ → small skip,
+  // near-polygon look; high λ → max skip, sharpest star). The chord
+  // intersections carve out the rosette's pentagonal cells and central
+  // star automatically — no separate cell construction needed.
   void drawRosone1Cells() {
     pa.pushStyle();
     pa.noFill();
@@ -152,8 +153,11 @@ class PortolanApp {
     // q.v is the full packing-circle polygon; tau scales the chord-star
     // vertices toward the cell's center so the star size becomes a
     // fraction of the enclosing packing circle (tau=1.0 → vertices on
-    // the packing circle, tau=0.85 → 85% of the way out, etc.).
-    drawStarPolygon(r, scaleVerticesTowardCenter(q, tau), chooseStarSkip(q.n));
+    // the packing circle, tau=0.85 → 85% of the way out, etc.). lambda
+    // picks the chord skip {n/skip}: low λ → small skip (near polygon,
+    // blunt), high λ → max skip (sharpest, deepest star points).
+    drawStarPolygon(r, scaleVerticesTowardCenter(q, tau),
+                    chooseStarSkipLambda(q.n, lambdaSharpness()));
   }
 
   // Convenience: copy q's vertex list into a primitive array (which is
@@ -198,11 +202,18 @@ class PortolanApp {
   }
 
   void drawRosone2OnPolygon(Renderer r, CycP q) {
-    final float MID_R_F   = 0.62f;   // mid-ring radius / rosette outer radius
-    final float INNER_R_F = 0.30f;   // inner-ring radius / rosette outer radius
-    final float APEX_F    = 0.85f;   // outer-cell apex radius / mid-ring radius
-    final float APEX2_F   = 0.70f;   // inner-cell apex radius / inner-ring radius
-    final float PETAL_F   = 0.18f;   // lens petal sagitta / chord length
+    // lambda controls how pointed the rosette feels. S ∈ [0,1]: at S=0
+    // the lens petals are nearly flat and the pentagonal cells' apexes
+    // sit out near the rings (blunt cells, gentle bulges); at S=1 the
+    // petals bulge out aggressively and apexes are pulled hard toward
+    // the center, sharpening the inner star points. The central
+    // {n/skip} star also uses the λ-driven skip so its tips match.
+    float S = lambdaSharpness();
+    final float MID_R_F   = 0.62f;
+    final float INNER_R_F = 0.30f;
+    final float APEX_F    = lerp(1.00f, 0.55f, S);  // outer-cell apex / mid-ring
+    final float APEX2_F   = lerp(0.95f, 0.50f, S);  // inner-cell apex / inner-ring
+    final float PETAL_F   = lerp(0.04f, 0.30f, S);  // lens sagitta / chord
 
     int N = q.n;
     if (N < 3) return;
@@ -250,7 +261,7 @@ class PortolanApp {
       renderPolygonClosed(r, new GPoint[] { w1, w2, U[(i + 1) % N], apex, U[i] });
     }
 
-    drawStarPolygon(r, U, chooseStarSkip(N));
+    drawStarPolygon(r, U, chooseStarSkipLambda(N, S));
   }
 
   // ===================================================================
@@ -301,11 +312,17 @@ class PortolanApp {
     // tau=1.0 → rosette touches the polygon edges; tau<1.0 → leaves an
     // annular gap inside the polygon for drawRosone3Gaps() to fill.
     float rosR = tau * R * cos(PI / max(3, q.n));
+    // lambda controls gothic petal sharpness via r3ext (how far the
+    // petal-layer outer points are pushed past the r3 ring) and the
+    // inner chord star's skip — higher λ = sharper petals + deeper
+    // chord star intersections.
+    float S = lambdaSharpness();
     float r1 = rosR * 0.18f;
     float r2 = rosR * 0.42f;
     float r3 = rosR * 0.65f;
-    float r3ext = r3 * 1.08f;
+    float r3ext = r3 * lerp(1.00f, 1.22f, S);
     float r4 = rosR * 0.95f;
+    int innerSkip = chooseStarSkipLambda(n, S);
 
     float a0 = atan2(q.v.get(0).y - q.y, q.v.get(0).x - q.x);
     float angleStep = TWO_PI / n;
@@ -344,11 +361,10 @@ class PortolanApp {
     for (int i = 0; i < n; ++i) {
       r.line(q.x, q.y, ring1[i].x, ring1[i].y);
     }
-    // Ring 1 chord star (i → i+2 mod n) — the sharp inner rosette.
-    for (int i = 0; i < n; ++i) {
-      GPoint a = ring1[i], b = ring1[(i + 2) % n];
-      r.line(a.x, a.y, b.x, b.y);
-    }
+    // Ring 1 chord star (i → i+innerSkip mod n) — the sharp inner
+    // rosette. innerSkip is λ-driven so sliding lambda visibly changes
+    // the central star pattern's depth.
+    drawStarPolygon(r, ring1, innerSkip);
 
     // Cross-sector diagonals between ring 1 and ring 2 — each ring 1 point
     // connects to its two angular neighbours one ring out, producing the
@@ -441,7 +457,14 @@ class PortolanApp {
     // packing circle. The rhombus-condition formula stays the same; we
     // just substitute the tau-scaled outer radius.
     float R = q.sc / 2.0f * tau;
-    float rInner = R / (2.0f * cos(PI / N));
+    // rhombus condition: rInner = R / (2 cos π/N) makes every kite a
+    // true rhombus. lambda scales this around the rhombus value:
+    //   S=0 → rInner big (kites flat/wide, V tips blunt)
+    //   S=1 → rInner small (kites elongated radially, V tips sharp)
+    // Default λ=0.42 (S=0.6) lands close to the rhombus condition.
+    float S = lambdaSharpness();
+    float rhombusR = R / (2.0f * cos(PI / N));
+    float rInner = rhombusR * lerp(1.35f, 0.55f, S);
 
     GPoint[] V = scaleVerticesTowardCenter(q, tau);
 
@@ -507,6 +530,34 @@ class PortolanApp {
     if (r < 1e-6f) return new GPoint(c.x + targetR, c.y);
     float k = targetR / r;
     return new GPoint(c.x + dx * k, c.y + dy * k);
+  }
+
+  // Normalize the lambda slider's [0.3, 0.5] range into a "sharpness"
+  // parameter S ∈ [0, 1] that every rosone interprets as "how pointed
+  // the star points should look". S = 0 → blunt, S = 1 → sharp/deep.
+  // Default λ = 0.42 → S = 0.6, a moderately sharp look.
+  float lambdaSharpness() {
+    return constrain((lambda - 0.3f) / 0.2f, 0.0f, 1.0f);
+  }
+
+  // λ-aware star skip picker. Interpolates target skip from 2 (blunt,
+  // near polygon) to ⌊(n-1)/2⌋ (deepest possible {n/skip} star) by S,
+  // then walks outward from `target` to find a coprime skip so the
+  // chord star traces a single connected line. Falls back to `target`
+  // (drawStarPolygon handles compound stars) if no coprime skip is
+  // found in range.
+  int chooseStarSkipLambda(int n, float S) {
+    if (n < 4) return 1;
+    int maxSkip = (n - 1) / 2;
+    int target = round(lerp(2, maxSkip, S));
+    target = constrain(target, 2, maxSkip);
+    for (int delta = 0; delta <= maxSkip; ++delta) {
+      int up   = target + delta;
+      int down = target - delta;
+      if (up   >= 2 && up   <= maxSkip && gcd2(n, up)   == 1) return up;
+      if (down >= 2 && down <= maxSkip && gcd2(n, down) == 1) return down;
+    }
+    return max(2, target);
   }
 
   // Pick a star-polygon skip {n/skip} that produces a visually pleasing
