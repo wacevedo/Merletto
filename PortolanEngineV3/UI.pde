@@ -32,6 +32,7 @@ final String W_IMP_JSON    = "importGraphJson";
 final String W_TAU        = "tau";
 final String W_LAMBDA     = "lambda";
 final String W_ZOOM       = "rightZoom";
+final String W_LINE_SCALE = "lineScale";
 final String W_SHOW_PACK  = "showPacking";
 final String W_SHOW_TILE  = "showTiling";
 final String W_EXP_PAT    = "exportPatternSvg";
@@ -72,7 +73,7 @@ final int UI_CARD_W  = RIGHT_PANEL_W - 24;       // 316
 final int UI_ENC_Y1  = 12;                       // top of "Graphical Encoding" card
 final int UI_ENC_H   = 408;                      // height of encoding card (extra room for the Rosone Type dropdown)
 final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap) → 352
-final int UI_DEC_H   = 332;                      // height of decoded-pattern card (extra row for the Zoom slider at the top)
+final int UI_DEC_H   = 346;                      // height of decoded-pattern card (room for Zoom + Line Weight sliders at the top)
 
 // Inner padding inside each card (text/widgets kept off the rounded border).
 final int UI_CARD_PAD_X = 14;
@@ -194,17 +195,20 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // ===================================================================
   y = UI_ENC_Y2 + 12 + UI_CARD_PAD_Y_TOP;
 
-  // Zoom — view-only scale around the right pattern center. Sits above
-  // tau/lambda because it's a *viewing* control, not a pattern parameter:
-  // sliding it doesn't change any geometry, only the magnification at
-  // which the pattern is rendered. Range 0.5x..4x covers everything from
-  // a wide overview to inspecting individual rosone cells up close.
+  // Viewing controls (don't change pattern geometry, only how it's drawn):
+  //   • Zoom        — matrix scale around the right-canvas center.
+  //   • Line Weight — multiplier on every rosone stroke weight.
+  // These sit above tau/lambda because they're rendering settings, not
+  // pattern parameters. Spacing is +16 (vs the usual +22) so all three
+  // sliders + the layout below still fit inside the 800 px window.
   addSlider(W_ZOOM, colX, y, colW, 0.5f, 4.0f, a.rightZoom, 2, false, "Zoom");
-  y += rowH + 22;
+  y += rowH + 16;
+  addSlider(W_LINE_SCALE, colX, y, colW, 0.2f, 2.0f, a.lineScale, 2, false, "Line Weight");
+  y += rowH + 16;
 
-  // Float sliders — 2 decimal places, no integer snap.
+  // Pattern-shape sliders — 2 decimal places, no integer snap.
   addSlider(W_TAU,    colX, y, colW, 0.7f, 0.9f, a.tau,    2, false, "tau (star size)");
-  y += rowH + 22;
+  y += rowH + 16;
   addSlider(W_LAMBDA, colX, y, colW, 0.3f, 0.5f, a.lambda, 2, false, "lambda (sharpness)");
   y += rowH + 18;
 
@@ -290,6 +294,7 @@ void onSliderChange(DragSlider s) {
   else if (n.equals(W_TAU))        { app.tau    = v; }
   else if (n.equals(W_LAMBDA))     { app.lambda = v; }
   else if (n.equals(W_ZOOM))       { app.rightZoom = v; }
+  else if (n.equals(W_LINE_SCALE)) { app.lineScale = v; }
 }
 
 // True when ANY of our dropdowns is currently expanded. We suppress slider

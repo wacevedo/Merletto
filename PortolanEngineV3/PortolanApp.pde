@@ -27,6 +27,15 @@ class PortolanApp {
   // completely unaffected, so the pattern's data and exports stay correct
   // regardless of zoom level.
   float rightZoom = 1.0f;
+
+  // Multiplier on every stroke weight used by the rosone draws on the
+  // right canvas. Default 0.55 produces noticeably thinner lines than
+  // raw weight values would, so fine details (chord intersections, kite
+  // edges, construction guides) stay legible even when overlaid. Each
+  // rosone keeps its OWN relative thick/thin ratios — we just scale the
+  // whole set down. The left graph editor's stroke weights are not
+  // touched (its drawL() doesn't reference this field).
+  float lineScale = 0.55f;
   java.util.HashMap<Integer, PattC> pCirc = new java.util.HashMap<Integer, PattC>();
   java.util.HashMap<Integer, CycP> pCyc = new java.util.HashMap<Integer, CycP>();
   java.util.ArrayList<Pent> p5 = new java.util.ArrayList<Pent>();
@@ -120,14 +129,14 @@ class PortolanApp {
     Renderer r = new PARenderer(pa);
     if (shTile) {
       pa.stroke(0, 155, 170);
-      pa.strokeWeight(0.75f);
+      pa.strokeWeight(0.75f * lineScale);
       for (CycP q : pCyc.values()) {
         if (!q.on) continue;
         renderPolygonClosed(r, cycPVerts(q));
       }
     }
     pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.0f);
+    pa.strokeWeight(1.0f * lineScale);
     for (CycP q : pCyc.values()) {
       if (!q.on || q.n < 4) continue;
       drawRosone1OnPolygon(r, q);
@@ -170,7 +179,7 @@ class PortolanApp {
   void drawRosone2Cells() {
     pa.pushStyle();
     pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.0f);
+    pa.strokeWeight(1.0f * lineScale);
     pa.noFill();
     Renderer r = new PARenderer(pa);
     for (CycP q : pCyc.values()) {
@@ -302,7 +311,7 @@ class PortolanApp {
 
     // ---- Construction guides (thin, light gray) ----
     pa.stroke(190, 190, 190);
-    pa.strokeWeight(0.5f);
+    pa.strokeWeight(0.5f * lineScale);
     r.circle(q.x, q.y, r1 * 2);
     r.circle(q.x, q.y, r2 * 2);
     r.circle(q.x, q.y, r3 * 2);
@@ -313,7 +322,7 @@ class PortolanApp {
 
     // ---- Main rosette (thick, red) ----
     pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.5f);
+    pa.strokeWeight(1.5f * lineScale);
 
     // Inner star — center → ring 1 spokes.
     for (int i = 0; i < n; ++i) {
@@ -362,7 +371,7 @@ class PortolanApp {
   // reference image has surrounding its central rosette.
   void drawRosone3Gaps(Renderer r) {
     pa.stroke(80, 80, 80);
-    pa.strokeWeight(1.0f);
+    pa.strokeWeight(1.0f * lineScale);
     for (CycP q : pCyc.values()) {
       if (!q.on) continue;
       renderPolygonClosed(r, cycPVerts(q));
