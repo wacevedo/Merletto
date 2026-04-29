@@ -376,9 +376,18 @@ void drawSliders(PApplet p) {
 String pendingSvgExport = null; // "pattern", "full", or "graph"
 boolean pendingJsonExport = false;
 
+// Set true while applyLoadedStateToUi() is pushing values into ControlP5
+// widgets during a JSON import. ControlP5's setValue fires controlEvent
+// synchronously, and W_GRAPH_TYPE's handler regenerates the mesh from
+// scratch — which would wipe the points + constraints we just loaded.
+// Guarding controlEvent with this flag lets us reuse the same
+// dropdown/toggle setters without disabling the user's interactions.
+boolean suppressControlEvents = false;
+
 // Single dispatcher for all ControlP5 events.
 void controlEvent(ControlEvent ce) {
   if (app == null) return;
+  if (suppressControlEvents) return;
   String n = ce.getName();
   if (n == null) return;
 
@@ -477,6 +486,20 @@ void saveSvgFile(File f, String kind) {
 
 // ===== JSON helpers (minimal, tailored to our payload shape) =====
 
+// Graph JSON shape:
+//   { "points": [...], "constraints": [...], "meta": { ... } }
+//
+// `points` and `constraints` match the JS reference exactly (same field
+// names, same numeric format) so files exported here remain importable
+// by the original constelation/ web app and vice versa.
+//
+// The `meta` block is a Processing-port extension that captures the
+// rest of the editor state — graph type + per-type sizes, the active
+// rosone, all three pattern shape sliders (Star Size, Tau, Lambda),
+// the show-packing/show-tiling toggles, and view-only line scale +
+// zoom — so loading restores the entire workspace, not just the mesh.
+// `loadGraphFromJson` reads `meta` if present and silently ignores it
+// when missing (i.e. files from the JS app still load cleanly).
 String graphToJson(PortolanApp a) {
   StringBuilder sb = new StringBuilder();
   sb.append("{\n  \"points\": [\n");
@@ -493,7 +516,22 @@ String graphToJson(PortolanApp a) {
     if (i < a.mesh.conEdge.size() - 1) sb.append(',');
     sb.append('\n');
   }
-  sb.append("  ]\n}\n");
+  sb.append("  ],\n  \"meta\": {\n");
+  sb.append("    \"graphKind\": ").append(a.graphKind).append(",\n");
+  sb.append("    \"triSz\": ").append(a.triSz).append(",\n");
+  sb.append("    \"kSz\": ").append(a.kSz).append(",\n");
+  sb.append("    \"sLay\": ").append(a.sLay).append(",\n");
+  sb.append("    \"sPt\": ").append(a.sPt).append(",\n");
+  sb.append("    \"rN\": ").append(a.rN).append(",\n");
+  sb.append("    \"rosoneKind\": ").append(a.rosoneKind).append(",\n");
+  sb.append("    \"tau\": ").append(nfJson(a.tau)).append(",\n");
+  sb.append("    \"innerTau\": ").append(nfJson(a.innerTau)).append(",\n");
+  sb.append("    \"lambda\": ").append(nfJson(a.lambda)).append(",\n");
+  sb.append("    \"shPack\": ").append(a.shPack).append(",\n");
+  sb.append("    \"shTile\": ").append(a.shTile).append(",\n");
+  sb.append("    \"lineScale\": ").append(nfJson(a.lineScale)).append(",\n");
+  sb.append("    \"rightZoom\": ").append(nfJson(a.rightZoom)).append("\n");
+  sb.append("  }\n}\n");
   return sb.toString();
 }
 
@@ -522,6 +560,94 @@ void loadGraphFromJson(PortolanApp a, String json) {
   a.mesh = m;
   a.sel = -1;
   a.markMeshDirty();
+
+  // Parse optional `meta` fields. Each readJson*() walks the whole JSON
+  // and grabs the first match for that key, returning a default when
+  // the field is absent — that way files exported by the JS reference
+  // (which only has `points` + `constraints`) load with the current
+  // editor settings preserved instead of getting reset.
+  a.graphKind  = readJsonInt(json, "graphKind",  a.graphKind);
+  a.triSz      = readJsonInt(json, "triSz",      a.triSz);
+  a.kSz        = readJsonInt(json, "kSz",        a.kSz);
+  a.sLay       = readJsonInt(json, "sLay",       a.sLay);
+  a.sPt        = readJsonInt(json, "sPt",        a.sPt);
+  a.rN         = readJsonInt(json, "rN",         a.rN);
+  a.rosoneKind = readJsonInt(json, "rosoneKind", a.rosoneKind);
+  a.tau        = readJsonFloat(json, "tau",        a.tau);
+  a.innerTau   = readJsonFloat(json, "innerTau",   a.innerTau);
+  a.lambda     = readJsonFloat(json, "lambda",     a.lambda);
+  a.shPack     = readJsonBool(json,  "shPack",     a.shPack);
+  a.shTile     = readJsonBool(json,  "shTile",     a.shTile);
+  a.lineScale  = readJsonFloat(json, "lineScale",  a.lineScale);
+  a.rightZoom  = readJsonFloat(json, "rightZoom",  a.rightZoom);
+
+  applyLoadedStateToUi(a);
+}
+
+int readJsonInt(String json, String key, int fallback) {
+  java.util.regex.Matcher m = java.util.regex.Pattern
+    .compile("\"" + java.util.regex.Pattern.quote(key) + "\"\\s*:\\s*(-?\\d+)")
+    .matcher(json);
+  return m.find() ? Integer.parseInt(m.group(1)) : fallback;
+}
+float readJsonFloat(String json, String key, float fallback) {
+  java.util.regex.Matcher m = java.util.regex.Pattern
+    .compile("\"" + java.util.regex.Pattern.quote(key) + "\"\\s*:\\s*(-?[0-9]*\\.?[0-9]+(?:[eE][-+]?\\d+)?)")
+    .matcher(json);
+  return m.find() ? Float.parseFloat(m.group(1)) : fallback;
+}
+boolean readJsonBool(String json, String key, boolean fallback) {
+  java.util.regex.Matcher m = java.util.regex.Pattern
+    .compile("\"" + java.util.regex.Pattern.quote(key) + "\"\\s*:\\s*(true|false)")
+    .matcher(json);
+  return m.find() ? m.group(1).equals("true") : fallback;
+}
+
+// After a JSON load mutates app fields directly, the UI widgets still
+// show their pre-load values — DragSliders cache `value` internally,
+// ControlP5 dropdowns/toggles keep their own state. This pushes the
+// freshly-loaded app state back into every visible widget so the panel
+// matches the file we just imported. ControlP5's setValue fires
+// controlEvent synchronously, so we guard with suppressControlEvents
+// to keep the dropdown handler from regenerating the mesh and wiping
+// the freshly-loaded points.
+void applyLoadedStateToUi(PortolanApp a) {
+  if (cp5 == null) return;
+  setSliderValue(W_TRI_SIZE,    a.triSz);
+  setSliderValue(W_KING_SIZE,   a.kSz);
+  setSliderValue(W_SPI_LAYERS,  a.sLay);
+  setSliderValue(W_SPI_POINTS,  a.sPt);
+  setSliderValue(W_RAND_PTS,    a.rN);
+  setSliderValue(W_TAU,         a.tau);
+  setSliderValue(W_INNER_TAU,   a.innerTau);
+  setSliderValue(W_LAMBDA,      a.lambda);
+  setSliderValue(W_LINE_SCALE,  a.lineScale);
+  setSliderValue(W_ZOOM,        a.rightZoom);
+
+  suppressControlEvents = true;
+  try {
+    Controller gt = cp5.getController(W_GRAPH_TYPE);
+    if (gt != null) gt.setValue(a.graphKind);
+    setGraphTypeBarLabel(cp5, a.graphKind);
+
+    Controller rt = cp5.getController(W_ROSONE_TYPE);
+    if (rt != null) rt.setValue(a.rosoneKind);
+    setRosoneTypeBarLabel(cp5, a.rosoneKind);
+
+    Controller togPack = cp5.getController(W_SHOW_PACK);
+    if (togPack != null) togPack.setValue(a.shPack ? 1 : 0);
+    Controller togTile = cp5.getController(W_SHOW_TILE);
+    if (togTile != null) togTile.setValue(a.shTile ? 1 : 0);
+  } finally {
+    suppressControlEvents = false;
+  }
+
+  syncUIFromApp(cp5, a);
+}
+
+void setSliderValue(String name, float v) {
+  DragSlider s = sliders.get(name);
+  if (s != null) s.setValue(v);
 }
 
 // ===== SVG helpers =====
@@ -582,20 +708,52 @@ String graphToSvg(PortolanApp a) {
   return s.toString();
 }
 
-// Pattern SVG: emit the active Rosone (1 or 2) and optionally the underlying
-// packing circles + cyclic-polygon outlines. We dispatch through the same
-// Renderer-based drawRosone1OnPolygon / drawRosone2OnPolygon methods that
-// drawAll() uses, so the SVG file is geometrically identical to what's on
-// screen — no parallel implementation to keep in sync.
+// Pattern SVG: emit the currently-selected Rosone (1, 2, 3, or 4) and
+// optionally the underlying packing circles + cyclic-polygon outlines.
+// drawAll() and this function both go through the SAME drawCurrentRosone
+// dispatcher so the SVG is geometrically identical to what's on screen,
+// and SVGRenderer.setStroke produces a separate <g> per color/weight
+// run (preserving Rosone 3's gray construction guides + red main rosette,
+// Rosone 1's optional teal tile outlines, etc.).
+//
+// The viewBox is computed from the packing circles (with padding) so the
+// exported file crops tightly around the actual pattern instead of the
+// full canvas area.
 String patternToSvg(PortolanApp a, boolean includePackingAndTiling) {
+  // -- Bounding box from packing circles (the rosones never extend past
+  //    their enclosing packing circle, so this gives a tight crop). --
+  float bbMinX = Float.POSITIVE_INFINITY, bbMinY = Float.POSITIVE_INFINITY;
+  float bbMaxX = Float.NEGATIVE_INFINITY, bbMaxY = Float.NEGATIVE_INFINITY;
+  for (PattC c : a.pCirc.values()) {
+    float r = c.d / 2.0f;
+    if (c.x - r < bbMinX) bbMinX = c.x - r;
+    if (c.y - r < bbMinY) bbMinY = c.y - r;
+    if (c.x + r > bbMaxX) bbMaxX = c.x + r;
+    if (c.y + r > bbMaxY) bbMaxY = c.y + r;
+  }
+  if (bbMinX == Float.POSITIVE_INFINITY) {
+    // No packing — fall back to the right half of the canvas so the SVG
+    // is still well-formed (just with an empty pattern area).
+    bbMinX = CANVAS_W * 0.5f; bbMinY = 0;
+    bbMaxX = CANVAS_W;        bbMaxY = CANVAS_H;
+  }
+  float pad = 30;
+  bbMinX -= pad; bbMinY -= pad; bbMaxX += pad; bbMaxY += pad;
+  float bbW = bbMaxX - bbMinX, bbH = bbMaxY - bbMinY;
+
   StringBuilder s = new StringBuilder();
   s.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
   s.append(String.format(java.util.Locale.US,
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\">\n",
-    CANVAS_W, CANVAS_H, CANVAS_W, CANVAS_H));
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.0f\" height=\"%.0f\" viewBox=\"%.3f %.3f %.3f %.3f\">\n",
+    bbW, bbH, bbMinX, bbMinY, bbW, bbH));
   s.append(String.format(java.util.Locale.US,
-    "  <rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" fill=\"#ffffff\"/>\n",
-    CANVAS_W, CANVAS_H));
+    "  <title>Portolan pattern (Rosone %d)</title>\n", a.rosoneKind + 1));
+  s.append(String.format(java.util.Locale.US,
+    "  <desc>tau=%.2f, innerTau=%.2f, lambda=%.2f</desc>\n",
+    a.tau, a.innerTau, a.lambda));
+  s.append(String.format(java.util.Locale.US,
+    "  <rect x=\"%.3f\" y=\"%.3f\" width=\"%.3f\" height=\"%.3f\" fill=\"#ffffff\"/>\n",
+    bbMinX, bbMinY, bbW, bbH));
 
   if (includePackingAndTiling) {
     s.append("  <g id=\"packing\" fill=\"rgba(240,173,78,0.16)\" stroke=\"none\">\n");
@@ -604,28 +762,24 @@ String patternToSvg(PortolanApp a, boolean includePackingAndTiling) {
         "    <circle cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"/>\n", c.x, c.y, c.d / 2.0f));
     }
     s.append("  </g>\n");
-    s.append("  <g id=\"tiling\" stroke=\"#888888\" stroke-width=\"0.75\" fill=\"none\">\n");
+    s.append("  <g id=\"tiling\">\n");
     SVGRenderer tileR = new SVGRenderer(s, "    ");
+    tileR.setStroke(0x88, 0x88, 0x88, 0.75f);
     for (CycP q : a.pCyc.values()) {
       if (!q.on) continue;
       renderPolygonClosed(tileR, a.cycPVerts(q));
     }
+    tileR.close();
     s.append("  </g>\n");
   }
 
-  s.append("  <g id=\"pattern\" stroke=\"#dd5c50\" stroke-width=\"1\" fill=\"none\">\n");
+  // Pattern itself — drawCurrentRosone routes every stroke change
+  // through SVGRenderer.setStroke, so each color/weight run becomes
+  // its own <g>. After dispatch we close the trailing group.
+  s.append("  <g id=\"pattern\">\n");
   SVGRenderer patR = new SVGRenderer(s, "    ");
-  if (a.rosoneKind == 1) {
-    for (CycP q : a.pCyc.values()) {
-      if (!q.on) continue;
-      a.drawRosone2OnPolygon(patR, q);
-    }
-  } else {
-    for (CycP q : a.pCyc.values()) {
-      if (!q.on || q.n < 4) continue;
-      a.drawRosone1OnPolygon(patR, q);
-    }
-  }
+  a.drawCurrentRosone(patR);
+  patR.close();
   s.append("  </g>\n</svg>\n");
   return s.toString();
 }

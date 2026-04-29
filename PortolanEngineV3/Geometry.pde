@@ -16,6 +16,13 @@
 interface Renderer {
   void line(float x1, float y1, float x2, float y2);
   void circle(float cx, float cy, float diameter);
+  // Set the active stroke color and weight. PARenderer translates this
+  // to pa.stroke / pa.strokeWeight; SVGRenderer closes the current
+  // <g> and opens a new one with the new attrs so each color/weight
+  // run becomes its own SVG group, preserving the multi-color look
+  // that drawRosone3 (gray construction guides + red main rosette)
+  // and drawRosone1 (teal tile + red star) need on export.
+  void setStroke(int r, int g, int b, float weight);
 }
 
 class PARenderer implements Renderer {
@@ -23,21 +30,66 @@ class PARenderer implements Renderer {
   PARenderer(PApplet pa) { this.pa = pa; }
   public void line(float x1, float y1, float x2, float y2) { pa.line(x1, y1, x2, y2); }
   public void circle(float cx, float cy, float d) { pa.ellipse(cx, cy, d, d); }
+  public void setStroke(int r, int g, int b, float weight) {
+    pa.stroke(r, g, b);
+    pa.strokeWeight(weight);
+  }
 }
 
 class SVGRenderer implements Renderer {
   StringBuilder sb;
   String prefix;
-  SVGRenderer(StringBuilder sb, String prefix) { this.sb = sb; this.prefix = prefix; }
+  // Track the currently-open <g> so setStroke can close+reopen on
+  // every color/weight change. Calling setStroke before any line/circle
+  // is the normal case; if a caller draws without ever setting stroke
+  // first, we lazily open a default group on the first primitive.
+  boolean groupOpen = false;
+  int curR = 0, curG = 0, curB = 0;
+  float curWeight = 1.0f;
+
+  SVGRenderer(StringBuilder sb, String prefix) {
+    this.sb = sb;
+    this.prefix = prefix;
+  }
+
   public void line(float x1, float y1, float x2, float y2) {
-    sb.append(prefix).append(String.format(java.util.Locale.US,
+    ensureGroup();
+    sb.append(prefix).append("  ").append(String.format(java.util.Locale.US,
       "<line x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\"/>\n",
       x1, y1, x2, y2));
   }
   public void circle(float cx, float cy, float d) {
-    sb.append(prefix).append(String.format(java.util.Locale.US,
+    ensureGroup();
+    sb.append(prefix).append("  ").append(String.format(java.util.Locale.US,
       "<circle cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"/>\n",
       cx, cy, d / 2.0f));
+  }
+  public void setStroke(int r, int g, int b, float weight) {
+    if (groupOpen && r == curR && g == curG && b == curB && abs(weight - curWeight) < 1e-3f) {
+      return; // No-op when color/weight haven't actually changed.
+    }
+    closeGroup();
+    curR = r; curG = g; curB = b; curWeight = weight;
+    String hex = String.format("#%02x%02x%02x", r, g, b);
+    sb.append(prefix).append(String.format(java.util.Locale.US,
+      "<g stroke=\"%s\" stroke-width=\"%.3f\" fill=\"none\">\n", hex, weight));
+    groupOpen = true;
+  }
+  // Caller invokes this after the last draw to flush the trailing group.
+  void close() { closeGroup(); }
+
+  void ensureGroup() {
+    if (!groupOpen) {
+      // Default style if nobody called setStroke: red @ 1.0px to match
+      // the legacy single-group export look.
+      setStroke(0xdd, 0x5c, 0x50, 1.0f);
+    }
+  }
+  void closeGroup() {
+    if (groupOpen) {
+      sb.append(prefix).append("</g>\n");
+      groupOpen = false;
+    }
   }
 }
 

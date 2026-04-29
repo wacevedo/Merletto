@@ -105,28 +105,31 @@ class PortolanApp {
 
     try {
       pack();
-      if (rosoneKind == 1) {
-        // Rosone 2 — clean per-cell rosette with outer circle, lens
-        // petals, mid/inner pentagonal cells, and a central star.
-        drawRosone2Cells();
-      } else if (rosoneKind == 2) {
-        // Rosone 3 — gothic per-cell rosette + gap-filler polygon
-        // outlines as the irregular surrounding network.
-        drawRosone3Cells();
-      } else if (rosoneKind == 3) {
-        // Rosone 4 — N kite/rhombus cells fanning out from each
-        // cyclic polygon's center (rhombus tessellation of the cell).
-        drawRosone4Cells();
-      } else {
-        // Rosone 1 — chord-based {N/skip} star polygon per cell. shTile
-        // still draws the polygon outlines when enabled.
-        drawRosone1Cells();
-      }
+      drawCurrentRosone(new PARenderer(pa));
     } finally {
       pa.popMatrix();
       pa.noClip();
       pa.popStyle();
     }
+  }
+
+  // Single dispatch entry point: drawAll() and patternToSvg() both call
+  // this with their respective Renderer (PARenderer for screen, SVGRenderer
+  // for export), so the on-screen pattern and the exported SVG always
+  // come from the same drawing code.
+  void drawCurrentRosone(Renderer r) {
+    pa.pushStyle();
+    pa.noFill();
+    if (rosoneKind == 1) {
+      drawRosone2Cells(r);
+    } else if (rosoneKind == 2) {
+      drawRosone3Cells(r);
+    } else if (rosoneKind == 3) {
+      drawRosone4Cells(r);
+    } else {
+      drawRosone1Cells(r);
+    }
+    pa.popStyle();
   }
 
   // Rosone 1 — chord-based star polygon per cyclic polygon. For each q in
@@ -135,25 +138,19 @@ class PortolanApp {
   // near-polygon look; high λ → max skip, sharpest star). The chord
   // intersections carve out the rosette's pentagonal cells and central
   // star automatically — no separate cell construction needed.
-  void drawRosone1Cells() {
-    pa.pushStyle();
-    pa.noFill();
-    Renderer r = new PARenderer(pa);
+  void drawRosone1Cells(Renderer r) {
     if (shTile) {
-      pa.stroke(0, 155, 170);
-      pa.strokeWeight(0.75f * lineScale);
+      r.setStroke(0, 155, 170, 0.75f * lineScale);
       for (CycP q : pCyc.values()) {
         if (!q.on) continue;
         renderPolygonClosed(r, cycPVerts(q));
       }
     }
-    pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.0f * lineScale);
+    r.setStroke(220, 90, 80, 1.0f * lineScale);
     for (CycP q : pCyc.values()) {
       if (!q.on || q.n < 4) continue;
       drawRosone1OnPolygon(r, q);
     }
-    pa.popStyle();
   }
 
   void drawRosone1OnPolygon(Renderer r, CycP q) {
@@ -200,17 +197,12 @@ class PortolanApp {
   // polygon's size (q.sc), shape, and side count (q.n) come from the
   // circle packing the user's mesh produces, so editing the graph
   // immediately changes every mini-rosette on the right.
-  void drawRosone2Cells() {
-    pa.pushStyle();
-    pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.0f * lineScale);
-    pa.noFill();
-    Renderer r = new PARenderer(pa);
+  void drawRosone2Cells(Renderer r) {
+    r.setStroke(220, 90, 80, 1.0f * lineScale);
     for (CycP q : pCyc.values()) {
       if (!q.on) continue;
       drawRosone2OnPolygon(r, q);
     }
-    pa.popStyle();
   }
 
   void drawRosone2OnPolygon(Renderer r, CycP q) {
@@ -305,20 +297,13 @@ class PortolanApp {
   //
   // Same per-polygon, graph-driven model as Rosone 1 / 2 — editing the
   // graph on the left immediately changes every Rosone 3 cell.
-  void drawRosone3Cells() {
-    pa.pushStyle();
-    pa.noFill();
-    Renderer r = new PARenderer(pa);
-
+  void drawRosone3Cells(Renderer r) {
     // Gap pass first so the rosettes draw on top of the polygon outlines.
     drawRosone3Gaps(r);
-
     for (CycP q : pCyc.values()) {
       if (!q.on || q.n < 3) continue;
       drawRosone3OnPolygon(r, q);
     }
-
-    pa.popStyle();
   }
 
   void drawRosone3OnPolygon(Renderer r, CycP q) {
@@ -364,8 +349,7 @@ class PortolanApp {
     }
 
     // ---- Construction guides (thin, light gray) ----
-    pa.stroke(190, 190, 190);
-    pa.strokeWeight(0.5f * lineScale);
+    r.setStroke(190, 190, 190, 0.5f * lineScale);
     r.circle(q.x, q.y, r1 * 2);
     r.circle(q.x, q.y, r2 * 2);
     r.circle(q.x, q.y, r3 * 2);
@@ -375,8 +359,7 @@ class PortolanApp {
     }
 
     // ---- Main rosette (thick, red) ----
-    pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.5f * lineScale);
+    r.setStroke(220, 90, 80, 1.5f * lineScale);
 
     // Inner star — center → ring 1 spokes.
     for (int i = 0; i < n; ++i) {
@@ -423,8 +406,7 @@ class PortolanApp {
   // chaining them produces the "irregular polygonal mesh" look the
   // reference image has surrounding its central rosette.
   void drawRosone3Gaps(Renderer r) {
-    pa.stroke(80, 80, 80);
-    pa.strokeWeight(1.0f * lineScale);
+    r.setStroke(80, 80, 80, 1.0f * lineScale);
     for (CycP q : pCyc.values()) {
       if (!q.on) continue;
       renderPolygonClosed(r, cycPVerts(q));
@@ -456,17 +438,12 @@ class PortolanApp {
   // N ≥ 4 the construction is well-defined.
   //
   // Same per-polygon, graph-driven model as the other Rosones.
-  void drawRosone4Cells() {
-    pa.pushStyle();
-    pa.noFill();
-    pa.stroke(220, 90, 80);
-    pa.strokeWeight(1.5f * lineScale);
-    Renderer r = new PARenderer(pa);
+  void drawRosone4Cells(Renderer r) {
+    r.setStroke(220, 90, 80, 1.5f * lineScale);
     for (CycP q : pCyc.values()) {
       if (!q.on || q.n < 4) continue;
       drawRosone4OnPolygon(r, q);
     }
-    pa.popStyle();
   }
 
   void drawRosone4OnPolygon(Renderer r, CycP q) {
