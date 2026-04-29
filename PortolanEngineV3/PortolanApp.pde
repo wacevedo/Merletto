@@ -828,16 +828,82 @@ class PortolanApp {
       for (int i = 0; i < rows - 1; i++) mesh.addConstraint(g[i][0], g[i + 1][0]);
       for (int i = 0; i < rows - 1; i++) mesh.addConstraint(g[i][cols - 1], g[i + 1][cols - 1]);
     } else if (k == 1) {
+      // King's Graph — rows×cols main grid + (rows-1)×(cols-1) cell-
+      // center points (the offset "queen-move" lattice). Only the
+      // perimeter is constrained; Delaunay handles the interior, which
+      // naturally produces the 8-neighbour (king-move) triangulation
+      // because every center point sits equidistant from its 4 corner
+      // neighbours. Ports constelation/sketch.js#generateKingsGraph.
       int n = kSz, rows = n, cols = n;
       float gw = (cols - 1) * sp, gh = (rows - 1) * sp, sx = cx - gw / 2, sy = cy - gh / 2;
       int[][] g = new int[rows][cols];
       for (int i = 0; i < rows; i++) for (int j = 0; j < cols; j++) { int v = mesh.vert.size(); g[i][j] = v; mesh.addPoint(new GPoint(sx + j * sp, sy + i * sp)); }
+      for (int i = 0; i < rows - 1; i++) for (int j = 0; j < cols - 1; j++) {
+        mesh.addPoint(new GPoint(sx + (j + 0.5f) * sp, sy + (i + 0.5f) * sp));
+      }
       for (int j = 0; j < cols - 1; j++) mesh.addConstraint(g[0][j], g[0][j + 1]);
       for (int j = 0; j < cols - 1; j++) mesh.addConstraint(g[rows - 1][j], g[rows - 1][j + 1]);
       for (int i = 0; i < rows - 1; i++) mesh.addConstraint(g[i][0], g[i + 1][0]);
       for (int i = 0; i < rows - 1; i++) mesh.addConstraint(g[i][cols - 1], g[i + 1][cols - 1]);
     } else if (k == 2) {
-      mSeed();
+      // Triangulated Spider Graph — `numLayers` concentric rings of
+      // `pointsPerLayer` points around a center vertex, fully
+      // triangulated with radial spokes, ring chords, and cross-layer
+      // diagonals. Produces the heptagonal/octagonal "net" pattern.
+      // Ports constelation/sketch.js#generateSpiderGraph.
+      int numLayers = sLay, pointsPerLayer = sPt;
+      float spMargin = grid * 2;
+      float maxRadius = min(drawW / 2.0f - 2 * spMargin, drawH - 2 * spMargin) / 2.0f;
+      float outerRadius = maxRadius * 0.85f;
+
+      int centerIdx = mesh.vert.size();
+      mesh.addPoint(new GPoint(cx, cy));
+
+      int[][] layers = new int[numLayers + 1][];
+      layers[0] = new int[] { centerIdx };
+
+      for (int layer = 1; layer <= numLayers; layer++) {
+        float layerRadius = ((float) layer / numLayers) * outerRadius;
+        int[] layerIdx = new int[pointsPerLayer];
+        for (int i = 0; i < pointsPerLayer; i++) {
+          float angle = (i * TWO_PI) / pointsPerLayer - HALF_PI;
+          float px = cx + layerRadius * cos(angle);
+          float py = cy + layerRadius * sin(angle);
+          layerIdx[i] = mesh.vert.size();
+          mesh.addPoint(new GPoint(px, py));
+        }
+        layers[layer] = layerIdx;
+      }
+
+      // Outer ring constraint (closes the boundary so the CDT respects it).
+      int[] outerLayer = layers[numLayers];
+      for (int i = 0; i < outerLayer.length; i++) {
+        mesh.addConstraint(outerLayer[i], outerLayer[(i + 1) % outerLayer.length]);
+      }
+
+      // Center → layer-1 spokes + layer-1 ring edges.
+      for (int i = 0; i < layers[1].length; i++) {
+        mesh.addConstraint(centerIdx, layers[1][i]);
+        mesh.addConstraint(layers[1][i], layers[1][(i + 1) % layers[1].length]);
+      }
+
+      // Cross-layer triangulation: between each pair of adjacent
+      // layers, add the four constraints that pin two triangles per
+      // sector (inner→outer, outer→innerNext, outer→outerNext,
+      // outerNext→innerNext) so the band stays a clean net even if
+      // the Delaunay step would otherwise pick different diagonals.
+      for (int layer = 1; layer < numLayers; layer++) {
+        int[] inner = layers[layer];
+        int[] outer = layers[layer + 1];
+        for (int i = 0; i < inner.length; i++) {
+          int innerNext = (i + 1) % inner.length;
+          int outerNext = (i + 1) % outer.length;
+          mesh.addConstraint(inner[i], outer[i]);
+          mesh.addConstraint(outer[i], inner[innerNext]);
+          mesh.addConstraint(outer[i], outer[outerNext]);
+          mesh.addConstraint(outer[outerNext], inner[innerNext]);
+        }
+      }
     } else {
       for (int i = 0; i < rN; i++) {
         float rx = pa.random(margin, drawW / 2f - margin), ry = pa.random(margin, drawH - margin);
