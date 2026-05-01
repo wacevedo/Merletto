@@ -419,15 +419,16 @@ class PortolanApp {
   //
   // For each cyclic polygon q in pCyc:
   //
-  //   • Use q's vertices V[0..N-1] as the OUTER vertices of N kite cells
-  //     (each kite's apex). Each V[k] sits on q's circumscribed circle
-  //     at radius R = q.sc / 2.
+  //   • Build a REGULAR outer ring V[0..N-1] of N evenly-spaced
+  //     apexes around q's center at radius R = (q.sc/2) * tau. Anchored
+  //     to the angle of q.v[0] so the rosette feels attached to the
+  //     cell. Using a regular ring (instead of q's irregular vertices
+  //     directly) ensures every kite occupies the same angular slice
+  //     and therefore has roughly the same size — even when the
+  //     underlying packing polygon is irregular.
   //   • Build an inner ring W[0..N-1] where W[k] sits on the bisector
-  //     ray of edge V[k]–V[k+1] (the line from C through that edge's
-  //     midpoint), at radius rInner = R / (2·cos(π/N)). For a regular
-  //     N-gon this radius makes every kite a TRUE rhombus (all four
-  //     sides equal); for irregular cells the rhombus condition only
-  //     holds approximately, but the kite construction stays valid.
+  //     between V[k] and V[k+1] at radius rInner. For a regular N-gon
+  //     this bisector is just an angle offset of (π/N) from V[k].
   //   • Each cell becomes a kite with vertices (C, W[k-1], V[k], W[k]).
   //     Drawn as: N spokes from C to each W, plus 2N edges V↔W (each
   //     V connects to the W on its left and right), plus the polygon
@@ -449,50 +450,50 @@ class PortolanApp {
   void drawRosone4OnPolygon(Renderer r, CycP q) {
     int N = q.n;
     if (N < 4) return;
-    // tau scales the entire kite tessellation (outer V ring + inner W
-    // ring + polygon outline) toward the cell's center, so the whole
-    // Rosone 4 motif sizes itself as a fraction of the enclosing
-    // packing circle. The rhombus-condition formula stays the same; we
-    // just substitute the tau-scaled outer radius.
+    // tau still sets the outer V ring radius as a fraction of the
+    // packing circle, so the whole Rosone 4 motif sizes itself
+    // relative to its enclosing cell.
     float R = q.sc / 2.0f * tau;
-    // rInner (the inner W ring on which the kite "outer base" vertices
-    // sit) is now driven by the new Tau slider as a direct fraction of
-    // the packing-circle radius. effectiveInnerFactor() clamps it
-    // strictly inside the outer V ring (which is tau * R_pack), so the
-    // kites never invert no matter how the two sliders are crossed.
-    // lambda's old kite-shape scaling has been retired here — innerTau
-    // now owns the inner-ring geometry — but we keep a small lambda
-    // bias so the slider still nudges the kite proportions: high λ
-    // pulls W slightly further toward center (sharper V tips), low λ
-    // pushes it slightly further out (blunter tips).
     float S = lambdaSharpness();
     float R_pack = q.sc / 2.0f;
-    // lambda multiplier stays in [0, 1] so rInner is always ≤
-    // effectiveInnerFactor * R_pack — and that's already clamped below
-    // the outer V ring, so the kites can't invert no matter how the
-    // sliders are crossed.
+    // Inner W ring radius — same formula as before (innerTau-driven
+    // with mild lambda bias). Always clamped strictly inside the
+    // outer V ring so the kites can't invert.
     float rInner = effectiveInnerFactor() * R_pack * lerp(1.00f, 0.75f, S);
 
-    GPoint[] V = scaleVerticesTowardCenter(q, tau);
+    // Petal count is unchanged (M = q.n) but apexes are now placed on
+    // a REGULAR ring around the cell center so every kite occupies the
+    // same angular slice, regardless of how irregular the underlying
+    // packing polygon is. Without this, an irregular q (vertices not
+    // evenly spaced around q.center) produces visibly mismatched petal
+    // sizes within the same rosone.
+    //
+    // The polygon outline (q.v) is still drawn unchanged, so the cell
+    // boundary is exactly what the packing produced.
+    //
+    // Anchor the regular ring to q.v[0]'s angle so the rosette feels
+    // visually attached to the polygon rather than rotated arbitrarily.
+    GPoint v0 = q.v.get(0);
+    float baseAngle = atan2(v0.y - q.y, v0.x - q.x);
+    float step = TWO_PI / N;
 
-    // W[k] lies on the C→edgeMidpoint(V[k], V[k+1]) ray, at radius rInner
-    // from C. For a regular N-gon this is the angle bisector between
-    // V[k] and V[k+1]. For irregular q's we still pick the geometric
-    // edge midpoint direction, which keeps adjacent V↔W edges of similar
-    // length even if not exactly equal.
-    GPoint[] W = new GPoint[N];
+    GPoint[] V = new GPoint[N];
     for (int k = 0; k < N; ++k) {
-      GPoint a = V[k], b = V[(k + 1) % N];
-      float mx = (a.x + b.x) * 0.5f, my = (a.y + b.y) * 0.5f;
-      float dx = mx - q.x, dy = my - q.y;
-      float d = sqrt(dx * dx + dy * dy);
-      if (d < 1e-6f) { W[k] = new GPoint(mx, my); continue; }
-      float s = rInner / d;
-      W[k] = new GPoint(q.x + dx * s, q.y + dy * s);
+      float a = baseAngle + k * step;
+      V[k] = new GPoint(q.x + cos(a) * R, q.y + sin(a) * R);
     }
 
-    // Spokes: center → each inner-ring vertex. These are the radial
-    // diagonals of the kite cells.
+    // W[k] sits on the bisector between V[k] and V[k+1] at radius
+    // rInner. With the regular V ring above this is just an angle
+    // offset of step/2 from V[k].
+    GPoint[] W = new GPoint[N];
+    for (int k = 0; k < N; ++k) {
+      float a = baseAngle + (k + 0.5f) * step;
+      W[k] = new GPoint(q.x + cos(a) * rInner, q.y + sin(a) * rInner);
+    }
+
+    // Spokes: center → each inner-ring vertex. Radial diagonals of the
+    // kite cells.
     for (int k = 0; k < N; ++k) {
       r.line(q.x, q.y, W[k].x, W[k].y);
     }
@@ -508,8 +509,9 @@ class PortolanApp {
       r.line(v.x, v.y, wR.x, wR.y);
     }
 
-    // Polygon outline — the kite cells live INSIDE this boundary.
-    renderPolygonClosed(r, V);
+    // Polygon outline — drawn from the original cell vertices so the
+    // cell boundary stays exactly what the packing produced.
+    renderPolygonClosed(r, cycPVerts(q));
   }
 
   // Scale each vertex of q.v toward q's center by `factor`. Because every
