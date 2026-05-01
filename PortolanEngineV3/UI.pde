@@ -129,7 +129,7 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   java.util.List<String> graphItems = java.util.Arrays.asList(GRAPH_TYPE_LABELS);
   cp.addScrollableList(W_GRAPH_TYPE)
     .setPosition(colX, y)
-    .setSize(colW, 110)
+    .setSize(colW, 24 + 22 * GRAPH_TYPE_LABELS.length)
     .setBarHeight(24)
     .setItemHeight(22)
     .addItems(graphItems)
