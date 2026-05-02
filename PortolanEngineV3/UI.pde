@@ -76,9 +76,9 @@ final String[] ROSONE_TYPE_LABELS = {
 final int UI_CARD_X  = CANVAS_W + 12;
 final int UI_CARD_W  = RIGHT_PANEL_W - 24;       // 316
 final int UI_ENC_Y1  = 12;                       // top of "Graphical Encoding" card
-final int UI_ENC_H   = 408;                      // height of encoding card (extra room for the Rosone Type dropdown)
-final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap) → 352
-final int UI_DEC_H   = 384;                      // height of decoded-pattern card (room for Zoom + Line Weight + Star Size + Tau + Lambda sliders)
+final int UI_ENC_H   = 332;                      // holds Graph Type + per-type sliders + 4 graph buttons
+final int UI_ENC_Y2  = UI_ENC_Y1 + UI_ENC_H;     // bottom (start of gap)
+final int UI_DEC_H   = 444;                      // holds Decoded Pattern label + Rosone Type + Tau + Lambda + Show Packing + Show Tiling + Line Weight + Zoom + Star Size + 2 export buttons (12 + UI_ENC_H + 12 + UI_DEC_H = 800 = CANVAS_H)
 
 // Inner padding inside each card (text/widgets kept off the rounded border).
 final int UI_CARD_PAD_X = 14;
@@ -162,31 +162,8 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // button below never moves when switching between graph types.
   y += rowH + 20 + rowH + 14;
 
-  // Rosone Type dropdown — selects the visual style for the right-panel
-  // pattern. Sits between the size sliders and the action buttons so that
-  // the topology controls cluster at the top and the I/O actions at the
-  // bottom of the card.
-  cp.addLabel("lbl_rosoneType")
-    .setText("Rosone Type")
-    .setPosition(colX, y)
-    .setColorValue(UI_LABEL_COLOR);
-  y += 16;
-
-  java.util.List<String> rosoneItems = java.util.Arrays.asList(ROSONE_TYPE_LABELS);
-  cp.addScrollableList(W_ROSONE_TYPE)
-    .setPosition(colX, y)
-    .setSize(colW, 24 + 22 * ROSONE_TYPE_LABELS.length)
-    .setBarHeight(24)
-    .setItemHeight(22)
-    .addItems(rosoneItems)
-    .setType(ControlP5.LIST)
-    .setOpen(false)
-    .close()
-    .setValue(a.rosoneKind);
-  setRosoneTypeBarLabel(cp, a.rosoneKind);
-  y += 24 + 14;
-
-  // Graph buttons
+  // Graph buttons (Rosone Type dropdown moved to the Decoded Pattern card
+  // below — pattern-style selection lives with the other pattern controls).
   cp.addButton(W_CLEAR)   .setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Clear Graph");
   y += btnH + gap;
   cp.addButton(W_EXP_JSON).setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Graph  (JSON)");
@@ -200,31 +177,46 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   // ===================================================================
   y = UI_ENC_Y2 + 12 + UI_CARD_PAD_Y_TOP;
 
-  // Viewing controls (don't change pattern geometry, only how it's drawn):
-  //   • Zoom        — matrix scale around the right-canvas center.
-  //   • Line Weight — multiplier on every rosone stroke weight.
-  // These sit above tau/lambda because they're rendering settings, not
-  // pattern parameters. Spacing is +16 (vs the usual +22) so all three
-  // sliders + the layout below still fit inside the 800 px window.
-  addSlider(W_ZOOM, colX, y, colW, 0.5f, 4.0f, a.rightZoom, 2, false, "Zoom");
-  y += rowH + 16;
-  addSlider(W_LINE_SCALE, colX, y, colW, 0.2f, 2.0f, a.lineScale, 2, false, "Line Weight");
-  y += rowH + 16;
+  // Card header label (in addition to the chrome title rendered by
+  // drawPanelCard). Placed at the top of the card content so the user
+  // sees "Decoded Pattern" as part of the widget stack itself.
+  cp.addLabel("lbl_decodedPattern")
+    .setText("Decoded Pattern")
+    .setPosition(colX, y)
+    .setColorValue(UI_LABEL_COLOR);
+  y += 18;
+
+  // Rosone Type dropdown — selects the visual style for the right-panel
+  // pattern. Lives in the Decoded Pattern card alongside the rest of the
+  // pattern controls.
+  java.util.List<String> rosoneItems = java.util.Arrays.asList(ROSONE_TYPE_LABELS);
+  cp.addScrollableList(W_ROSONE_TYPE)
+    .setPosition(colX, y)
+    .setSize(colW, 24 + 22 * ROSONE_TYPE_LABELS.length)
+    .setBarHeight(24)
+    .setItemHeight(22)
+    .addItems(rosoneItems)
+    .setType(ControlP5.LIST)
+    .setOpen(false)
+    .close()
+    .setValue(a.rosoneKind);
+  setRosoneTypeBarLabel(cp, a.rosoneKind);
+  // 24 = dropdown bar height, +22 leaves enough room for the Tau slider's
+  // caption (which renders 14 px above its bar) plus a visible gap, so the
+  // caption doesn't sit flush against the dropdown bottom.
+  y += 24 + 22;
 
   // Pattern-shape sliders — 2 decimal places, no integer snap.
-  // Star Size = outer-rosette radius / packing-circle radius (the old
-  //             "tau" — semantics unchanged, label simplified).
-  // Tau       = inner-circle radius / packing-circle radius (new, drives
-  //             each rosone's inner ring; clamped to stay inside the
+  // Tau       = inner-circle radius / packing-circle radius — drives
+  //             each rosone's inner ring (clamped to stay inside the
   //             outer rosette at draw time).
   // Lambda    = star-tip sharpness (chord skip / cell apex pull).
-  addSlider(W_TAU,       colX, y, colW, 0.4f, 1.0f, a.tau,      2, false, "Star Size");
-  y += rowH + 16;
   addSlider(W_INNER_TAU, colX, y, colW, 0.1f, 0.9f, a.innerTau, 2, false, "Tau");
   y += rowH + 16;
   addSlider(W_LAMBDA,    colX, y, colW, 0.3f, 0.5f, a.lambda,   2, false, "lambda (sharpness)");
   y += rowH + 18;
 
+  // Show Packing / Show Tiling — debug overlays on top of the pattern.
   Toggle togPack = cp.addToggle(W_SHOW_PACK)
     .setPosition(colX, y).setSize(18, 18)
     .setValue(a.shPack).setMode(ControlP5.DEFAULT)
@@ -242,7 +234,23 @@ void buildUI(ControlP5 cp, PortolanApp a) {
     .align(ControlP5.RIGHT_OUTSIDE, ControlP5.CENTER)
     .setPaddingX(8)
     .setColor(UI_LABEL_COLOR);
-  y += 36;
+  // Same 14 px caption-overhang issue as after the Rosone Type dropdown:
+  // bump from 32 → 40 so the Line Weight caption gets a visible gap above
+  // it instead of sitting flush against the Show Tiling toggle.
+  y += 40;
+
+  // Viewing controls (don't change pattern geometry, only how it's drawn):
+  //   • Line Weight — multiplier on every rosone stroke weight.
+  //   • Zoom        — matrix scale around the right-canvas center.
+  addSlider(W_LINE_SCALE, colX, y, colW, 0.2f, 2.0f, a.lineScale, 2, false, "Line Weight");
+  y += rowH + 16;
+  addSlider(W_ZOOM, colX, y, colW, 0.5f, 4.0f, a.rightZoom, 2, false, "Zoom");
+  y += rowH + 16;
+
+  // Star Size = outer-rosette radius / packing-circle radius (the old
+  //             "tau" — semantics unchanged, label simplified).
+  addSlider(W_TAU,       colX, y, colW, 0.4f, 1.0f, a.tau,      2, false, "Star Size");
+  y += rowH + 18;
 
   cp.addButton(W_EXP_PAT) .setPosition(colX, y).setSize(colW, btnH).setCaptionLabel("Export Pattern  (SVG)");
   y += btnH + gap;
@@ -257,6 +265,26 @@ void buildUI(ControlP5 cp, PortolanApp a) {
   if (rt != null) rt.bringToFront();
   Controller gt = cp.getController(W_GRAPH_TYPE);
   if (gt != null) gt.bringToFront();
+
+  // ControlP5's Label class force-uppercases caption/value text by default
+  // (the `toUpperCase` flag defaults to true), which is why widgets render
+  // as "CLEAR GRAPH" even though the source string is "Clear Graph". Walk
+  // every controller built so far and disable that flag on both the
+  // caption (button text, dropdown bar text, toggle text) and the value
+  // (numeric value labels, dropdown item rows). Done in one sweep at the
+  // end of buildUI so individual addButton / addToggle / addScrollableList
+  // calls above can stay readable.
+  disableUppercaseLabels(cp);
+}
+
+void disableUppercaseLabels(ControlP5 cp) {
+  if (cp == null) return;
+  for (controlP5.ControllerInterface<?> ci : cp.getAll()) {
+    if (!(ci instanceof Controller)) continue;
+    Controller<?> c = (Controller<?>) ci;
+    if (c.getCaptionLabel() != null) c.getCaptionLabel().toUpperCase(false);
+    if (c.getValueLabel() != null) c.getValueLabel().toUpperCase(false);
+  }
 }
 
 // Update the collapsed dropdown bar so it reads the currently selected
